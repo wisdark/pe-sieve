@@ -1,4 +1,4 @@
-cmake_minimum_required (VERSION 3.12.4)
+cmake_minimum_required (VERSION 3.0)
 project (pe-sieve)
 
 option(PESIEVE_BUILD_TESTING "Enable testing for PE-sieve" OFF)
@@ -95,6 +95,7 @@ set (scanners_hdrs
 	scanners/scanned_modules.h
 	scanners/hook_targets_resolver.h
 	scanners/thread_scanner.h
+	scanners/process_details.h
 )
 
 set (imprec_hdrs
@@ -178,6 +179,7 @@ set (srcs
 
 set (hdrs
 	pe_sieve.h
+	pe_sieve_report.h
 	include/pe_sieve_types.h
 	${params_info_hdrs}
 	${scanners_hdrs}
@@ -188,7 +190,8 @@ set (hdrs
 
 set (rsrc
 	resources.h
-	resources.rc
+	pe_sieve_ver_short.h
+	pe_sieve_res.rc
 )
 
 # set filters in Visual Studio project:
@@ -211,7 +214,6 @@ SOURCE_GROUP("Header Files\\postprocessors\\imp_rec" FILES ${imprec_hdrs} )
 include(GNUInstallDirs)
 set (library_export_hdrs
 	include/pe_sieve_types.h
-	include/pe_sieve_version.h
 	include/pe_sieve_api.h
 	include/pe_sieve_return_codes.h
 )
@@ -241,7 +243,7 @@ if(PESIEVE_AS_STATIC_LIB OR PESIEVE_AS_DLL)
 		)
 	endif()
 
-	add_library ( ${PROJECT_NAME} ${LIBRARY_TYPE} ${library_export_hdrs} ${hdrs} ${lib_srcs} )
+	add_library ( ${PROJECT_NAME} ${LIBRARY_TYPE} ${library_export_hdrs} ${hdrs} ${lib_srcs} ${rsrc} )
 
 	set_source_files_properties(main.def PROPERTIES HEADER_FILE_ONLY TRUE)
 	target_compile_definitions(${PROJECT_NAME} PUBLIC PESIEVE_${LIBRARY_TYPE}_LIB)
@@ -250,7 +252,7 @@ if(PESIEVE_AS_STATIC_LIB OR PESIEVE_AS_DLL)
 	)
 	set_source_files_properties(main.def PROPERTIES HEADER_FILE_ONLY TRUE)
 else()
-	add_executable ( ${PROJECT_NAME} ${hdrs} ${srcs} ${rsrc} main.cpp params.h )
+	add_executable ( ${PROJECT_NAME} ${hdrs} ${srcs} ${rsrc} pe_sieve_res_icon.rc  main.cpp params.h )
 endif()
 
 set (used_libs

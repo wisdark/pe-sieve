@@ -137,7 +137,7 @@ bool pesieve::ResultsDumper::dumpJsonReport(pesieve::ProcessScanReport &process_
 	if (json_report.is_open() == false) {
 		return false;
 	}
-	json_report << report_all;
+	json_report << report_all << std::endl;
 	if (json_report.is_open()) {
 		json_report.close();
 		return true;
@@ -166,7 +166,7 @@ bool pesieve::ResultsDumper::dumpJsonReport(ProcessDumpReport &process_report)
 	if (json_report.is_open() == false) {
 		return false;
 	}
-	json_report << report_all;
+	json_report << report_all << std::endl;
 	if (json_report.is_open()) {
 		json_report.close();
 		return true;
@@ -329,7 +329,9 @@ bool pesieve::ResultsDumper::dumpModule(IN HANDLE processHandle,
 		}
 	}
 	else {
-		std::cerr << "[-] Failed dumping module!" << std::endl;
+		if (!this->quiet) {
+			std::cerr << "[-] Failed dumping module!" << std::endl;
+		}
 		is_dumped = false;
 	}
 

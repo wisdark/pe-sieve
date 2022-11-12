@@ -1,5 +1,6 @@
 #include "mempage_data.h"
 #include "module_data.h"
+#include "../utils/process_util.h"
 
 using namespace pesieve;
 
@@ -58,19 +59,16 @@ bool pesieve::MemPageData::loadMappedName()
 
 bool pesieve::MemPageData::isRealMapping()
 {
-	if (this->loadedData == nullptr && !fillInfo()) {
-#ifdef _DEBUG
-		std::cerr << "Not loaded!" << std::endl;
-#endif
-		return false;
-	}
 	if (!loadMappedName()) {
 #ifdef _DEBUG
 		std::cerr << "Could not retrieve name" << std::endl;
 #endif
 		return false;
 	}
+	PVOID old_val = nullptr;
+	util::wow64_disable_fs_redirection(&old_val);
 	HANDLE file = CreateFileA(this->mapped_name.c_str(), GENERIC_READ, FILE_SHARE_READ, 0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0);
+	util::wow64_revert_fs_redirection(old_val);
 	if(file == INVALID_HANDLE_VALUE) {
 #ifdef _DEBUG
 		std::cerr << "Could not open file!" << std::endl;
@@ -88,7 +86,7 @@ bool pesieve::MemPageData::isRealMapping()
 	BYTE *rawData = (BYTE*) MapViewOfFile(mapping, FILE_MAP_READ, 0, 0, 0);
 	if (rawData == nullptr) {
 #ifdef _DEBUG
-		std::cerr << "Could not map view of file" << std::endl;
+		std::cerr << "Could not map view of file: " << this->mapped_name << std::endl;
 #endif
 		CloseHandle(mapping);
 		CloseHandle(file);
@@ -96,10 +94,17 @@ bool pesieve::MemPageData::isRealMapping()
 	}
 
 	bool is_same = false;
-	size_t r_size = GetFileSize(file, 0);
-	size_t smaller_size = this->loadedSize > r_size ? r_size : this->loadedSize;
-	if (memcmp(this->loadedData, rawData, smaller_size) == 0) {
-		is_same = true;
+	if (this->load()) {
+		size_t r_size = GetFileSize(file, 0);
+		size_t smaller_size = this->loadedSize > r_size ? r_size : this->loadedSize;
+		if (::memcmp(this->loadedData, rawData, smaller_size) == 0) {
+			is_same = true;
+		}
+	}
+	else {
+#ifdef _DEBUG
+		std::cerr << "[" << std::hex << start_va << "] Page not loaded!" << std::endl;
+#endif
 	}
 	UnmapViewOfFile(rawData);
 	CloseHandle(mapping);

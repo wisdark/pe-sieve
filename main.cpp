@@ -28,7 +28,7 @@ void print_report(const pesieve::ReportEx& report, const t_params args)
 
 	std::string report_str;
 	if (args.json_output) {
-		report_str = scan_report_to_json(*report.scan_report, ProcessScanReport::REPORT_SUSPICIOUS_AND_ERRORS, args.json_lvl);
+		report_str = report_to_json(report, pesieve::REPORT_ALL, ProcessScanReport::REPORT_SUSPICIOUS_AND_ERRORS, args.json_lvl);
 	} else {
 		report_str = scan_report_to_string(*report.scan_report);
 	}
@@ -49,7 +49,7 @@ int main(int argc, char *argv[])
 	bool info_req = false;
 	t_params args = { 0 };
 
-	PEsieveParams uParams(PESIEVE_VERSION);
+	PEsieveParams uParams(PESIEVE_VERSION_STR);
 	if (argc < 2) {
 		uParams.printBanner();
 		uParams.printBriefInfo();

@@ -240,7 +240,7 @@ pesieve::ReportEx* pesieve::scan_and_dump(IN const pesieve::t_params args)
 std::string pesieve::info()
 {
 	std::stringstream stream;
-	stream << "Version:  " << PESIEVE_VERSION;
+	stream << "Version:  " << PESIEVE_VERSION_STR;
 #ifdef _WIN64
 	stream << " (x64)" << "\n";
 #else

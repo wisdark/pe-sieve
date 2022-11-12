@@ -13,7 +13,7 @@ namespace pesieve {
 			: processHandle(_process), start_va(_start_va), stop_va(_stop_va),
 			is_listed_module(false),
 			is_info_filled(false), loadedData(nullptr), loadedSize(0),
-			is_dep_enabled(false), is_process_refl(_is_process_refl)
+			is_process_refl(_is_process_refl)
 		{
 			fillInfo();
 		}
@@ -40,8 +40,6 @@ namespace pesieve {
 		bool is_private;
 		DWORD mapping_type;
 		bool is_listed_module;
-		bool is_dep_enabled;
-
 
 		ULONGLONG alloc_base;
 		ULONGLONG region_start;
@@ -50,6 +48,7 @@ namespace pesieve {
 		std::string mapped_name; ///< if the region is mapped from a file, stores its file name
 		std::string module_name; ///< if the region is on the list of loaded PEs, stores its module name
 
+		// Checks if `loadedData` is already filled, if not, fills it by reading the remote memory.
 		bool load()
 		{
 			if (loadedData) {
@@ -67,6 +66,7 @@ namespace pesieve {
 
 		bool loadMappedName();
 		bool loadModuleName();
+
 		// checks if the memory area is mapped 1-to-1 from the file on the disk
 		bool isRealMapping();
 

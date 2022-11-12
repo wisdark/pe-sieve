@@ -89,7 +89,9 @@ t_scan_status pesieve::ProcessScanner::scanForIATHooks(HANDLE processHandle, Mod
 	}
 
 	if (process_report.isModuleReplaced(modData.moduleHandle)) {
+#ifdef _DEBUG
 		std::cout << "Cannot scan replaced module for IAT hooks!\n";
+#endif
 		return SCAN_ERROR;
 	}
 	IATScanner scanner(processHandle, modData, remoteModData, *expMap, process_report.modulesInfo, filter);
@@ -211,10 +213,7 @@ ProcessScanReport* pesieve::ProcessScanner::scanRemote()
 	// scan working set
 	size_t regionsScanned = 0;
 	try {
-		//dont't scan your own working set
-		if (peconv::get_process_id(this->processHandle) != GetCurrentProcessId()) {
-			regionsScanned = scanWorkingSet(*pReport);
-		}
+		regionsScanned = scanWorkingSet(*pReport);
 	} catch (std::exception &e) {
 		regionsScanned = 0;
 		errorsStr << e.what();
@@ -262,24 +261,21 @@ size_t pesieve::ProcessScanner::scanWorkingSet(ProcessScanReport &pReport) //thr
 		throw std::runtime_error("Could not query the working set. ");
 		return 0;
 	}
-	ULONGLONG start_tick = GetTickCount64();
-	std::set<ULONGLONG> region_bases;
+	process_details proc_details(this->isReflection, this->isDEP);
+
+	DWORD start_tick = GetTickCount();
+	std::set<mem_region_info> region_bases;
 	size_t pages_count = util::enum_workingset(processHandle, region_bases);
 	if (!args.quiet) {
 		std::cout << "Scanning workingset: " << std::dec << pages_count << " memory regions." << std::endl;
 	}
 	size_t counter = 0;
 	//now scan all the nodes:
-	std::set<ULONGLONG>::iterator set_itr;
-	for (set_itr = region_bases.begin(); set_itr != region_bases.end(); ++set_itr, ++counter) {
-		const ULONGLONG region_base = *set_itr;
-		
-		MemPageData memPage(this->processHandle, this->isReflection, region_base, 0);
 
-		memPage.is_listed_module = pReport.hasModule(region_base);
-		memPage.is_dep_enabled = this->isDEP;
+	for (auto set_itr = region_bases.begin(); set_itr != region_bases.end(); ++set_itr, ++counter) {
+		const mem_region_info region = *set_itr;
 
-		WorkingSetScanner scanner(this->processHandle, memPage, this->args, pReport);
+		WorkingSetScanner scanner(this->processHandle, proc_details, region, this->args, pReport);
 		WorkingSetScanReport *my_report = scanner.scanRemote();
 		if (!my_report) {
 			continue;
@@ -296,7 +292,7 @@ size_t pesieve::ProcessScanner::scanWorkingSet(ProcessScanReport &pReport) //thr
 		pReport.appendReport(my_report);
 	}
 	if (!args.quiet) {
-		ULONGLONG total_time = GetTickCount64() - start_tick;
+		DWORD total_time = GetTickCount() - start_tick;
 		std::cout << "[*] Workingset scanned in " << std::dec << total_time << " ms" << std::endl;
 	}
 	return counter;
@@ -412,7 +408,7 @@ size_t pesieve::ProcessScanner::scanModulesIATs(ProcessScanReport &pReport) //th
 	if (!args.quiet) {
 		std::cout << "Scanning for IAT hooks: " << modules_count << " modules." << std::endl;
 	}
-	ULONGLONG start_tick = GetTickCount64();
+	DWORD start_tick = GetTickCount();
 	size_t counter = 0;
 	for (counter = 0; counter < modules_count; counter++) {
 		if (!processHandle) break; // this should never happen
@@ -439,7 +435,7 @@ size_t pesieve::ProcessScanner::scanModulesIATs(ProcessScanReport &pReport) //th
 		scanForIATHooks(processHandle, modData, remoteModData, pReport, this->args.iat);
 	}
 	if (!args.quiet) {
-		ULONGLONG total_time = GetTickCount64() - start_tick;
+		DWORD total_time = GetTickCount() - start_tick;
 		std::cout << "[*] IATs scanned in " << std::dec << total_time << " ms" << std::endl;
 	}
 	return counter;
@@ -450,11 +446,6 @@ size_t pesieve::ProcessScanner::scanThreads(ProcessScanReport& pReport) //throws
 {
 	const DWORD pid = pReport.pid; //original PID, not a reflection!
 
-	//dont't scan your own threads - it may give wrong results:
-	if (pid == GetCurrentProcessId()) {
-		return 0;
-	}
-
 	const bool is_64bit = pesieve::util::is_process_64bit(this->processHandle);
 #ifndef _WIN64
 	if (is_64bit) return 0;
@@ -463,7 +454,7 @@ size_t pesieve::ProcessScanner::scanThreads(ProcessScanReport& pReport) //throws
 	if (!args.quiet) {
 		std::cout << "Scanning threads." << std::endl;
 	}
-	ULONGLONG start_tick = GetTickCount64();
+	DWORD start_tick = GetTickCount();
 
 	std::vector<thread_info> threads_info;
 	if (!pesieve::util::fetch_threads_info(pid, threads_info)) { //extended info, but doesn't work on old Windows...
@@ -488,7 +479,7 @@ size_t pesieve::ProcessScanner::scanThreads(ProcessScanReport& pReport) //throws
 	ThreadScanner::FreeSymbols(this->processHandle);
 
 	if (!args.quiet) {
-		ULONGLONG total_time = GetTickCount64() - start_tick;
+		DWORD total_time = GetTickCount() - start_tick;
 		std::cout << "[*] Threads scanned in " << std::dec << total_time << " ms" << std::endl;
 	}
 	return 0;
