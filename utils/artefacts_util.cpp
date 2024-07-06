@@ -1,11 +1,13 @@
 #include "artefacts_util.h"
 #include <peconv.h>
-
+#include "code_patterns.h"
 #ifdef _DEBUG
 	#include <iostream>
 #endif
 
-BYTE* pesieve::util::find_pattern(BYTE *buffer, size_t buf_size, BYTE* pattern_buf, size_t pattern_size, size_t max_iter)
+using namespace sig_finder;
+
+BYTE* pesieve::util::find_pattern(BYTE* buffer, size_t buf_size, BYTE* pattern_buf, size_t pattern_size, size_t max_iter)
 {
 	for (size_t i = 0; (i + pattern_size) < buf_size; i++) {
 		if (max_iter != 0 && i > max_iter) break;
@@ -17,129 +19,91 @@ BYTE* pesieve::util::find_pattern(BYTE *buffer, size_t buf_size, BYTE* pattern_b
 }
 
 namespace pesieve {
-	typedef struct {
-		BYTE *ptr;
-		size_t size;
-	} t_pattern;
-};
 
-DWORD pesieve::util::is_32bit_code(BYTE *loadedData, size_t loadedSize)
-{
-	BYTE prolog32_pattern[] = {
-		0x55, // PUSH EBP
-		0x8b, 0xEC // MOV EBP, ESP
-	};
+	std::set<DWORD> HardcodedPatterns;
+	pesieve::util::Mutex g_HardcodedPatternsMutex;
 
-	BYTE prolog32_2_pattern[] = {
-		0x55, // PUSH EBP
-		0x89, 0xE5 // MOV EBP, ESP
-	};
+	size_t init_32_patterns(Node* rootN)
+	{
+		util::MutexLocker guard(g_HardcodedPatternsMutex);
+		if (!rootN) return 0;
 
-	BYTE prolog32_3_pattern[] = {
-		0x60, // PUSHAD
-		0x89, 0xE5 // MOV EBP, ESP
-	};
-
-	t_pattern patterns[] = {
-		{ prolog32_pattern,   sizeof(prolog32_pattern) },
-		{ prolog32_2_pattern, sizeof(prolog32_2_pattern) },
-		{ prolog32_3_pattern, sizeof(prolog32_3_pattern) }
-	};
-
-	DWORD pattern_found = CODE_PATTERN_NOT_FOUND;
-	for (DWORD i = 0; i < _countof(patterns); i++) {
-		if (find_pattern(loadedData, loadedSize, patterns[i].ptr, patterns[i].size)) {
-			pattern_found = i;
-			break;
+		size_t added = 0;
+		for (size_t i = 0; i < _countof(patterns32); i++)
+		{
+			const t_pattern& pattern = patterns32[i];
+			std::string name = "prolog32_" + std::to_string((ULONGLONG)i);
+			Signature sign(name, pattern.ptr, pattern.size);
+			if (rootN->addPattern(sign)) {
+				HardcodedPatterns.insert(sign.checksum());
+				added++;
+			}
 		}
+		return added;
 	}
-	return pattern_found;
+
+	size_t init_64_patterns(Node* rootN)
+	{
+		util::MutexLocker guard(g_HardcodedPatternsMutex);
+		if (!rootN) return 0;
+
+		size_t added = 0;
+		for (size_t i = 0; i < _countof(patterns64); i++)
+		{
+			const t_pattern &pattern = patterns64[i];
+			std::string name = "prolog64_" + std::to_string((ULONGLONG)i);
+			Signature sign(name, pattern.ptr, pattern.size);
+			if (rootN->addPattern(sign)) {
+				HardcodedPatterns.insert(sign.checksum());
+				added++;
+			}
+		}
+		return added;
+	}
+
+	inline size_t search_till_pattern(sig_finder::Node& rootN, const BYTE* loadedData, size_t loadedSize)
+	{
+		Match m = sig_finder::find_first_match(rootN, loadedData, loadedSize);
+		if (!m.sign) {
+			return PATTERN_NOT_FOUND;
+		}
+		return m.offset;
+	}
+
+}; //namespace pesieve
+
+size_t pesieve::util::is_32bit_code(BYTE *loadedData, size_t loadedSize)
+{
+	static sig_finder::Node rootN;
+	if(rootN.isEnd()) {
+		init_32_patterns(&rootN);
+	}
+	return search_till_pattern(rootN, loadedData, loadedSize);
 }
 
-DWORD pesieve::util::is_64bit_code(BYTE* loadedData, size_t loadedSize)
+size_t pesieve::util::is_64bit_code(BYTE* loadedData, size_t loadedSize)
 {
-	BYTE prolog64_pattern[] = {
-		0x40, 0x53,       // PUSH RBX
-		0x48, 0x83, 0xEC // SUB RSP, <BYTE>
-	};
-	BYTE prolog64_2_pattern[] = {
-		0x55,            // PUSH RBP
-		0x48, 0x8B, 0xEC // MOV RBP, RSP
-	};
-	BYTE prolog64_3_pattern[] = {
-		0x40, 0x55,      // PUSH RBP
-		0x48, 0x83, 0xEC // SUB RSP, <BYTE>
-	};
-	BYTE prolog64_4_pattern[] = {
-		0x53,            // PUSH RBX
-		0x48, 0x81, 0xEC // SUB RSP, <DWORD>
-	};
-	BYTE prolog64_5_pattern[] = {
-		0x48, 0x83, 0xE4, 0xF0 // AND rsp, FFFFFFFFFFFFFFF0; Align RSP to 16 bytes
-	};
-	BYTE prolog64_6_pattern[] = {
-		0x57,            // PUSH RDI
-		0x48, 0x89, 0xE7 // MOV RDI, RSP
-	};
-	BYTE prolog64_7_pattern[] = {
-		 0x48, 0x8B, 0xC4, // MOV RAX, RSP
-		 0x48, 0x89, 0x58, 0x08, // MOV QWORD PTR [RAX + 8], RBX
-		 0x4C, 0x89, 0x48, 0x20, // MOV QWORD PTR [RAX + 0X20], R9
-		 0x4C, 0x89, 0x40, 0x18, // MOV QWORD PTR [RAX + 0X18], R8
-		 0x48, 0x89, 0x50, 0x10, // MOV QWORD PTR [RAX + 0X10], RDX
-		 0x55, // PUSH RBP
-		 0x56, // PUSH RSI
-		 0x57, // PUSH RDI 
-		 0x41, 0x54, // PUSH R12
-		 0x41, 0x55, // PUSH R13
-		 0x41, 0x56, // PUSH R14
-		 0x41, 0x57 // PUSH R15
-	};
-
-	t_pattern patterns[] = {
-		{ prolog64_pattern,   sizeof(prolog64_pattern) },
-		{ prolog64_2_pattern, sizeof(prolog64_2_pattern) },
-		{ prolog64_3_pattern, sizeof(prolog64_3_pattern) },
-		{ prolog64_4_pattern, sizeof(prolog64_4_pattern) },
-		{ prolog64_5_pattern, sizeof(prolog64_5_pattern) },
-		{ prolog64_6_pattern, sizeof(prolog64_6_pattern) },
-		{ prolog64_7_pattern, sizeof(prolog64_7_pattern) }
-	};
-
-	DWORD pattern_found = CODE_PATTERN_NOT_FOUND;
-	for (DWORD i = 0; i < _countof(patterns); i++) {
-		if (find_pattern(loadedData, loadedSize, patterns[i].ptr, patterns[i].size)) {
-			pattern_found = i;
-			break;
-		}
+	static sig_finder::Node rootN;
+	if (rootN.isEnd()) {
+		init_64_patterns(&rootN);
 	}
-	return pattern_found;
+	return search_till_pattern(rootN, loadedData, loadedSize);
 }
 
 bool pesieve::util::is_code(BYTE* loadedData, size_t loadedSize)
 {
+	static sig_finder::Node rootN;
 	if (peconv::is_padding(loadedData, loadedSize, 0)) {
 		return false;
 	}
-	DWORD pattern_found = CODE_PATTERN_NOT_FOUND;
-	bool is64 = false;
-
-	bool found = false;
-	if ((pattern_found = is_32bit_code(loadedData, loadedSize)) != CODE_PATTERN_NOT_FOUND) {
-		found = true;
+	if (rootN.isEnd()) {
+		init_32_patterns(&rootN);
+		init_64_patterns(&rootN);
 	}
-	if (!found) {
-		if ((pattern_found = is_64bit_code(loadedData, loadedSize)) != CODE_PATTERN_NOT_FOUND) {
-			found = true;
-			is64 = true;
-		}
+	if ((search_till_pattern(rootN, loadedData, loadedSize)) != PATTERN_NOT_FOUND) {
+		return true;
 	}
-#ifdef _DEBUG
-	if (found) {
-		std::cout << "Is64: " << is64 << " Pattern ID: " << pattern_found << "\n";
-	}
-#endif
-	return found;
+	return false;
 }
 
 bool pesieve::util::is_executable(DWORD mapping_type, DWORD protection)
@@ -173,4 +137,74 @@ bool pesieve::util::is_normal_inaccessible(DWORD state, DWORD mapping_type, DWOR
 		return true;
 	}
 	return false;
+}
+
+//---
+// matcher:
+
+bool pesieve::PatternMatcher::isReady()
+{
+	util::MutexLocker guard(mainMatcherMutex);
+	return (mainMatcher.isEnd()) ? false : true;
+}
+
+size_t pesieve::PatternMatcher::loadPatternFile(const char* filename)
+{
+	util::MutexLocker guard(mainMatcherMutex);
+	static bool isLoaded = false;
+	if (isLoaded) return 0; // allow to load file only once
+
+	isLoaded = true;
+	std::vector<Signature*> signatures;
+	Signature::loadFromFile(filename, signatures);
+	const size_t added = mainMatcher.addPatterns(signatures);
+	// delete the loaded signatures:
+	for (auto itr = signatures.begin(); itr != signatures.end(); ++itr) {
+		Signature* sign = *itr;
+		delete sign;
+	}
+	std::cout << "Added patterns: " << std::dec << added << "\n";
+	return added;
+}
+
+bool pesieve::PatternMatcher::initShellcodePatterns()
+{
+	util::MutexLocker guard(mainMatcherMutex);
+	static bool isLoaded = false;
+	if (isLoaded) return false; // allow to load only once
+
+	isLoaded = true;
+	init_32_patterns(&mainMatcher);
+	init_64_patterns(&mainMatcher);
+	return true;
+}
+
+size_t pesieve::PatternMatcher::findAllPatterns(BYTE* loadedData, size_t loadedSize, std::vector<sig_finder::Match>& allMatches)
+{
+	if (!isReady()) {
+		return false;
+	}
+	if (peconv::is_padding(loadedData, loadedSize, 0)) {
+		return false;
+	}
+	const size_t matches = sig_finder::find_all_matches(mainMatcher, loadedData, loadedSize, allMatches);
+	return matches;
+}
+
+size_t pesieve::PatternMatcher::filterCustom(std::vector<sig_finder::Match>& allMatches, std::vector<sig_finder::Match>& customPatternMatches)
+{
+	util::MutexLocker guard(g_HardcodedPatternsMutex);
+	size_t customCount = 0;
+	for (auto itr = allMatches.begin(); itr != allMatches.end(); ++itr) {
+		sig_finder::Match m = *itr;
+		if (m.sign) {
+			const DWORD checks = m.sign->checksum();
+			if (HardcodedPatterns.find(checks) != HardcodedPatterns.end()) {
+				continue;
+			}
+			customPatternMatches.push_back(m);
+			customCount++;
+		}
+	}
+	return customCount;
 }

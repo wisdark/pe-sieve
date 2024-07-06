@@ -3,55 +3,10 @@
 #include <peconv.h>
 #include <string>
 #include <map>
+#include "../utils/custom_mutex.h"
 
 namespace pesieve
 {
-	namespace util {
-		struct Mutex {
-		public:
-			Mutex()
-			{
-				InitializeCriticalSection(&cs);
-			}
-
-			void Lock()
-			{
-				EnterCriticalSection(&cs);
-			}
-
-			void Unlock()
-			{
-				LeaveCriticalSection(&cs);
-			}
-
-			~Mutex()
-			{
-				DeleteCriticalSection(&cs);
-			}
-
-		private:
-			CRITICAL_SECTION cs;
-		};
-
-		struct MutexLocker
-		{
-		public:
-			MutexLocker(Mutex& _mutex)
-				: mutex(_mutex)
-			{
-				mutex.Lock();
-			}
-
-			~MutexLocker()
-			{
-				mutex.Unlock();
-			}
-
-		private:
-			Mutex& mutex;
-		};
-	};
-
 	struct CachedModule {
 	public:
 		CachedModule() 
@@ -67,7 +22,7 @@ namespace pesieve
 
 			memcpy(moduleData, _moduleData, _moduleSize);
 			moduleSize = _moduleSize;
-			lastUsage = GetTickCount64();
+			lastUsage = GetTickCount();
 		}
 
 		BYTE* mapFromCached(size_t &mappedSize) const
@@ -90,7 +45,7 @@ namespace pesieve
 		
 		BYTE* moduleData;
 		size_t moduleSize;
-		ULONGLONG lastUsage;
+		DWORD lastUsage;
 	};
 
 
@@ -99,7 +54,6 @@ namespace pesieve
 	public:
 		
 		static const size_t MinUsageCntr = 2; ///< how many times loading of the module must be requested before the module is added to cache
-		static const size_t MaxCachedModules = 255; ///< how many modules can be stored in the cache at the time
 
 		ModulesCache()
 		{
@@ -125,26 +79,32 @@ namespace pesieve
 				CachedModule* cached = itr->second;
 				if (!cached) return nullptr;
 				
-				cached->lastUsage = GetTickCount64();
+				cached->lastUsage = GetTickCount();
 				return cached->mapFromCached(mappedSize);
 			}
 			return nullptr;
 		}
 
-		bool prepareCacheSpace(bool force_free = false)
+		bool isCacheAvailable(const size_t neededSize);
+
+		bool prepareCacheSpace(const size_t neededSize, bool force_free)
 		{
 			util::MutexLocker guard(cacheMutex);
-			const bool is_cache_available = cachedModules.size() < MaxCachedModules;
-			if (is_cache_available && !force_free) {
-				return true;
+			if (force_free) {
+				_deleteLeastRecent();
 			}
-			return _deleteLeastRecent();
+			while (!isCacheAvailable(neededSize)) {
+				if (!_deleteLeastRecent()) {
+					return false; // cannot make free space
+				}
+			}
+			return true;
 		}
 
 		bool _deleteLeastRecent()
 		{
-			ULONGLONG lTimestamp = 0;
-			ULONGLONG gTimestamp = 0;
+			DWORD lTimestamp = 0;
+			DWORD gTimestamp = 0;
 			std::map<std::string, CachedModule*>::iterator foundItr = cachedModules.end();
 
 			std::map<std::string, CachedModule*>::iterator itr;

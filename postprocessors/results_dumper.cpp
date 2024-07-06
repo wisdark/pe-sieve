@@ -209,6 +209,24 @@ pesieve::ProcessDumpReport* pesieve::ResultsDumper::dumpDetectedModules(
 	return dumpReport;
 }
 
+bool pesieve::ResultsDumper::fillModuleCopy(IN ModuleScanReport* mod, IN OUT PeBuffer& module_buf)
+{
+	if (!mod) return false;
+
+	bool filled = false;
+
+	// first try to use cache:
+	WorkingSetScanReport* wsReport = dynamic_cast<WorkingSetScanReport*>(mod);
+	if (wsReport && wsReport->data_cache.isFilled()) {
+		filled = module_buf.fillFromBuffer((ULONGLONG)mod->module, wsReport->data_cache);
+	}
+	// if no cache, or loading from cache failed, read from the process memory:
+	if (!filled) {
+		filled = module_buf.readRemote((ULONGLONG)mod->module, mod->moduleSize);
+	}
+	return filled;
+}
+
 bool pesieve::ResultsDumper::dumpModule(IN HANDLE processHandle,
 	IN bool isRefl,
 	IN const ModulesInfo &modulesInfo,
@@ -234,7 +252,7 @@ bool pesieve::ResultsDumper::dumpModule(IN HANDLE processHandle,
 	ArtefactScanReport* artefactReport = dynamic_cast<ArtefactScanReport*>(mod);
 	if (artefactReport) {
 		payload_ext = get_payload_ext(*artefactReport);
-		//whenever the artefactReport is available, use it to reconstruct a PE
+		// whenever the artefactReport is available, use it to reconstruct a PE
 		if (artefactReport->has_shellcode) {
 			dump_shellcode = true;
 		}
@@ -252,7 +270,7 @@ bool pesieve::ResultsDumper::dumpModule(IN HANDLE processHandle,
 	}
 	// if it is not an artefact report, or reconstructing by artefacts failed, read it from the memory:
 	if (!artefactReport || is_corrupt_pe) {
-		module_buf.readRemote((ULONGLONG)mod->module, mod->moduleSize);
+		fillModuleCopy(mod, module_buf);
 	}
 	//if no extension selected yet, do it now:
 	if (payload_ext.length() == 0) {
@@ -291,7 +309,7 @@ bool pesieve::ResultsDumper::dumpModule(IN HANDLE processHandle,
 			curr_dump_mode = peconv::PE_DUMP_VIRTUAL;
 		}
 		modDumpReport->mode_info = get_dump_mode_name(curr_dump_mode);
-		bool iat_not_rebuilt = (imprec_res == ImpReconstructor::IMP_RECOVERY_ERROR) || (imprec_res = ImpReconstructor::IMP_RECOVERY_NOT_APPLICABLE);
+		bool iat_not_rebuilt = (imprec_res == ImpReconstructor::IMP_RECOVERY_ERROR) || (imprec_res == ImpReconstructor::IMP_RECOVERY_NOT_APPLICABLE);
 		if (iat_not_rebuilt || save_imp_report) {
 			std::string imports_file = modDumpReport->dumpFileName + ".imports.txt";
 			if (impRec.printFoundIATs(imports_file)) {
@@ -309,7 +327,8 @@ bool pesieve::ResultsDumper::dumpModule(IN HANDLE processHandle,
 		if (dump_shellcode) {
 			payload_ext = "shc";
 		}
-		module_buf.readRemote((ULONGLONG)mod->module, mod->moduleSize);
+
+		fillModuleCopy(mod, module_buf);
 
 		modDumpReport = new ModuleDumpReport(module_buf.getModuleBase(), module_buf.getBufferSize());
 		dumpReport.appendReport(modDumpReport);
@@ -340,10 +359,21 @@ bool pesieve::ResultsDumper::dumpModule(IN HANDLE processHandle,
 		std::string tags_file = modDumpReport->dumpFileName + ".tag";
 
 		if (codeScanReport->generateTags(tags_file)) {
-			modDumpReport->tagsFileName = tags_file;
+			modDumpReport->hooksTagFileName = tags_file;
 			modDumpReport->isReportDumped = true;
 		}
 	}
+
+	pesieve::WorkingSetScanReport* wsScanReport = dynamic_cast<pesieve::WorkingSetScanReport*>(mod);
+	if (wsScanReport) {
+		std::string tags_file = modDumpReport->dumpFileName + ".pattern.tag";
+
+		if (wsScanReport->generateTags(tags_file)) {
+			modDumpReport->patternsTagFileName = tags_file;
+			modDumpReport->isReportDumped = true;
+		}
+	}
+
 
 	IATScanReport* iatHooksReport = dynamic_cast<IATScanReport*>(mod);
 	if (iatHooksReport) {
@@ -379,7 +409,7 @@ void pesieve::ResultsDumper::makeAndJoinDirectories(std::stringstream& stream)
 	}
 }
 
-std::string pesieve::ResultsDumper::makeModuleDumpPath(ULONGLONG modBaseAddr, std::string fname, const std::string &default_extension)
+std::string pesieve::ResultsDumper::makeModuleDumpPath(ULONGLONG modBaseAddr, const std::string &fname, const std::string &default_extension)
 {
 	std::stringstream stream;
 	makeAndJoinDirectories(stream);
@@ -393,7 +423,7 @@ std::string pesieve::ResultsDumper::makeModuleDumpPath(ULONGLONG modBaseAddr, st
 	return stream.str();
 }
 
-std::string pesieve::ResultsDumper::makeOutPath(std::string fname, const std::string& default_extension)
+std::string pesieve::ResultsDumper::makeOutPath(const std::string &fname, const std::string& default_extension)
 {
 	std::stringstream stream;
 	makeAndJoinDirectories(stream);

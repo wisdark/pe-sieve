@@ -28,7 +28,7 @@ using namespace pesieve::util;
 
 namespace pesieve {
 
-	bool validate_param_str(PARAM_STRING &strparam)
+	bool validate_param_str(PARAM_STRING& strparam)
 	{
 		if (!strparam.buffer || strparam.length == 0) {
 			return false;
@@ -38,10 +38,36 @@ namespace pesieve {
 		}
 		return true;
 	}
+
+	namespace util {
+
+		void print_scantime(std::stringstream& stream, size_t timeInMs)
+		{
+			float seconds = ((float)timeInMs / 1000);
+			float minutes = ((float)timeInMs / 60000);
+			stream << std::dec << timeInMs << " ms.";
+			if (seconds > 0.5) {
+				stream << " = " << seconds << " sec.";
+			}
+			if (minutes > 0.5) {
+				stream << " = " << minutes << " min.";
+			}
+		}
+
+	}; // namespace util
+
+	void print_scan_time(const char* scanned_element, size_t total_time)
+	{
+		std::stringstream ss;
+		ss << "[*] "<< scanned_element << " scanned in ";
+		util::print_scantime(ss, total_time);
+		std::cout << ss.str() << std::endl;
+	}
+
 };
 
 pesieve::ProcessScanner::ProcessScanner(HANDLE procHndl, bool is_reflection, pesieve::t_params _args)
-	: args(_args), isDEP(false), isReflection(is_reflection)
+	: args(_args), isDEP(false), isReflection(is_reflection), symbols(procHndl)
 {
 	this->processHandle = procHndl;
 	if (validate_param_str(args.modules_ignored)) {
@@ -193,7 +219,7 @@ ProcessScanReport* pesieve::ProcessScanner::scanRemote()
 
 	const bool is_64bit = pesieve::util::is_process_64bit(this->processHandle);
 
-	ProcessScanReport *pReport = new ProcessScanReport(this->args.pid, is_64bit, this->isReflection);
+	ProcessScanReport *pReport = new ProcessScanReport(this->args.pid, is_64bit, this->isReflection, &this->args);
 
 	char image_buf[MAX_PATH] = { 0 };
 	GetProcessImageFileNameA(this->processHandle, image_buf, MAX_PATH);
@@ -244,7 +270,7 @@ ProcessScanReport* pesieve::ProcessScanner::scanRemote()
 	}
 
 	// throw error only if none of the scans was successful
-	if (!modulesScanned && !iatsScanned && !regionsScanned) {
+	if (!modulesScanned && !iatsScanned && !regionsScanned && !threadsScanned) {
 		throw std::runtime_error(errorsStr.str());
 	}
 	//post-process hooks
@@ -292,8 +318,8 @@ size_t pesieve::ProcessScanner::scanWorkingSet(ProcessScanReport &pReport) //thr
 		pReport.appendReport(my_report);
 	}
 	if (!args.quiet) {
-		DWORD total_time = GetTickCount() - start_tick;
-		std::cout << "[*] Workingset scanned in " << std::dec << total_time << " ms" << std::endl;
+		const DWORD total_time = GetTickCount() - start_tick;
+		print_scan_time("Workingset", total_time);
 	}
 	return counter;
 }
@@ -435,8 +461,8 @@ size_t pesieve::ProcessScanner::scanModulesIATs(ProcessScanReport &pReport) //th
 		scanForIATHooks(processHandle, modData, remoteModData, pReport, this->args.iat);
 	}
 	if (!args.quiet) {
-		DWORD total_time = GetTickCount() - start_tick;
-		std::cout << "[*] IATs scanned in " << std::dec << total_time << " ms" << std::endl;
+		const DWORD total_time = GetTickCount() - start_tick;
+		print_scan_time("IATs", total_time);
 	}
 	return counter;
 }
@@ -444,6 +470,11 @@ size_t pesieve::ProcessScanner::scanModulesIATs(ProcessScanReport &pReport) //th
 
 size_t pesieve::ProcessScanner::scanThreads(ProcessScanReport& pReport) //throws exceptions
 {
+	if (!this->symbols.InitSymbols()) {
+		std::cerr << "Failed to initialize symbols!\n";
+		return 0;
+	}
+
 	const DWORD pid = pReport.pid; //original PID, not a reflection!
 
 	const bool is_64bit = pesieve::util::is_process_64bit(this->processHandle);
@@ -468,7 +499,6 @@ size_t pesieve::ProcessScanner::scanThreads(ProcessScanReport& pReport) //throws
 		}
 	}
 
-	ThreadScanner::InitSymbols(this->processHandle);
 	std::vector<thread_info>::iterator itr;
 	for (itr = threads_info.begin(); itr != threads_info.end(); ++itr) {
 		const thread_info &info = *itr;
@@ -477,11 +507,9 @@ size_t pesieve::ProcessScanner::scanThreads(ProcessScanReport& pReport) //throws
 		ThreadScanReport* report = scanner.scanRemote();
 		pReport.appendReport(report);
 	}
-	ThreadScanner::FreeSymbols(this->processHandle);
-
 	if (!args.quiet) {
-		DWORD total_time = GetTickCount() - start_tick;
-		std::cout << "[*] Threads scanned in " << std::dec << total_time << " ms" << std::endl;
+		const DWORD total_time = GetTickCount() - start_tick;
+		print_scan_time("Threads", total_time);
 	}
 	return 0;
 }

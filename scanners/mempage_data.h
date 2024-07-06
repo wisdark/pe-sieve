@@ -4,6 +4,8 @@
 
 #include <peconv.h>
 
+#include "../utils/byte_buffer.h"
+
 namespace pesieve {
 
 	class MemPageData
@@ -12,7 +14,7 @@ namespace pesieve {
 		MemPageData(HANDLE _process, bool _is_process_refl, ULONGLONG _start_va, ULONGLONG _stop_va)
 			: processHandle(_process), start_va(_start_va), stop_va(_stop_va),
 			is_listed_module(false),
-			is_info_filled(false), loadedData(nullptr), loadedSize(0),
+			is_info_filled(false),
 			is_process_refl(_is_process_refl)
 		{
 			fillInfo();
@@ -22,15 +24,17 @@ namespace pesieve {
 		{
 			_freeRemote();
 		}
+
 		bool isRefl() const { return is_process_refl; }
 		bool fillInfo();
 		bool isInfoFilled() { return is_info_filled; }
-		size_t getLoadedSize() { return loadedSize; }
-		const PBYTE getLoadedData() { return loadedData; }
+		size_t getLoadedSize(bool trimmed = false) { return loadedData.getDataSize(trimmed); }
+		const PBYTE getLoadedData(bool trimmed = false) { return (PBYTE)loadedData.getData(trimmed); }
+		const size_t getStartOffset(bool trimmed = false) { return loadedData.getStartOffset(trimmed); }
 
 		bool validatePtr(const LPVOID field_bgn, size_t field_size)
 		{
-			return peconv::validate_ptr(this->loadedData, this->loadedSize, field_bgn, field_size);
+			return loadedData.isValidPtr((BYTE*)field_bgn, field_size);
 		}
 
 		ULONGLONG start_va; ///< VA that was requested. May not be beginning of the region.
@@ -51,14 +55,14 @@ namespace pesieve {
 		// Checks if `loadedData` is already filled, if not, fills it by reading the remote memory.
 		bool load()
 		{
-			if (loadedData) {
+			if (loadedData.isFilled()) {
 				return true;
 			}
 			if (!_loadRemote()) {
 				return false;
 			}
 			//check again:
-			if (loadedData) {
+			if (loadedData.isFilled()) {
 				return true;
 			}
 			return false;
@@ -70,22 +74,15 @@ namespace pesieve {
 		// checks if the memory area is mapped 1-to-1 from the file on the disk
 		bool isRealMapping();
 
+		util::ByteBuffer loadedData;
+
 	protected:
 		bool _loadRemote();
 
 		void _freeRemote()
 		{
-			if (!loadedData) {
-				loadedSize = 0;
-				return;
-			}
-			peconv::free_aligned(loadedData, loadedSize);
-			loadedData = nullptr;
-			loadedSize = 0;
+			loadedData.freeBuffer();
 		}
-
-		PBYTE loadedData;
-		size_t loadedSize;
 
 		bool is_info_filled;
 		const bool is_process_refl;

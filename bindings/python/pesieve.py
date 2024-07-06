@@ -3,15 +3,42 @@
 import ctypes
 import os
 
+PESIEVE_MIN_VER = 0x030800 # minimal version of the PE-sieve DLL to work with this wrapper
+PESIEVE_MAX_VER = 0x030800 # maximal version of the PE-sieve DLL to work with this wrapper
+
 ERROR_SCAN_FAILURE = -1
 MAX_PATH =  260
+
+def version_to_str(version_val):
+    major = (version_val >> 24) & 0xFF
+    minor = (version_val >> 16) & 0xFF
+    patch = (version_val >> 8) & 0xFF
+    build = version_val & 0xFF
+    return f"{major}.{minor}.{patch}.{build}"
+
+###
 
 class t_output_filter(ctypes.c_int):
 	OUT_FULL = 0
 	OUT_NO_DUMPS = 1
 	OUT_NO_DIR = 2
 	OUT_FILTERS_COUNT = 3
-
+    
+class t_shellc_mode(ctypes.c_int):
+	SHELLC_NONE = 0
+	SHELLC_PATTERNS = 1
+	SHELLC_STATS = 2
+	SHELLC_PATTERNS_OR_STATS = 3
+	SHELLC_PATTERNS_AND_STATS = 4
+	SHELLC_COUNT = 5
+    
+class t_obfusc_mode(ctypes.c_int):
+	OBFUSC_NONE = 0
+	OBFUSC_STRONG_ENC = 1
+	OBFUSC_WEAK_ENC = 2
+	OBFUSC_ANY = 3
+	OBFUSC_COUNT = 4
+    
 class t_imprec_mode(ctypes.c_int):
 	PE_IMPREC_NONE = 0
 	PE_IMPREC_AUTO = 1
@@ -78,7 +105,8 @@ class t_params(ctypes.Structure):
 		('quiet', ctypes.c_bool),
 		('out_filter', t_output_filter),
 		('no_hooks', ctypes.c_bool),
-		('shellcode', ctypes.c_bool),
+		('shellcode', t_shellc_mode),
+		('obfuscated', t_obfusc_mode),
 		('threads', ctypes.c_bool),
 		('iat', t_iat_scan_mode),
 		('data', t_data_scan_mode),
@@ -114,9 +142,11 @@ class t_report(ctypes.Structure):
 	]
 
 lib = None
+PESieve_version = None
 
 def init():
 	global lib
+	global PESieve_version
 	ptr_size = ctypes.sizeof(ctypes.c_voidp)
 	if ptr_size == 4:
 		pesieve_dll = "pe-sieve32.dll"
@@ -129,6 +159,11 @@ def init():
 		pesieve_dir = os.path.abspath(os.getcwd())
 	pesieve_path = pesieve_dir + os.path.sep + pesieve_dll
 	lib = ctypes.cdll.LoadLibrary(pesieve_path)
+	PESieve_version = ctypes.cast(lib.PESieve_version, ctypes.POINTER(ctypes.c_uint32)).contents.value
+	if (PESieve_version < PESIEVE_MIN_VER or PESieve_version > PESIEVE_MAX_VER):
+		dll_version_str = version_to_str(PESieve_version)
+		exception_msg = f"Version mismatch: the PE-sieve.dll version ({dll_version_str}) doesn't match the bindings version"
+		raise Exception(exception_msg)
 
 def PESieve_help():
 	if not lib:

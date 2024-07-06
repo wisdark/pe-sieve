@@ -4,6 +4,8 @@
 
 #include "module_scanner.h"
 #include "../utils/threads_util.h"
+#include "../stats/stats.h"
+#include "../stats/entropy_stats.h"
 
 namespace pesieve {
 
@@ -17,8 +19,7 @@ namespace pesieve {
 		ThreadScanReport(DWORD _tid)
 			: ModuleScanReport(0, 0), 
 			tid(_tid), thread_ip(0), protection(0),
-			thread_state(THREAD_STATE_UNKNOWN), thread_wait_reason(0),
-			entropy(0), entropy_filled(false)
+			thread_state(THREAD_STATE_UNKNOWN), thread_wait_reason(0)
 		{
 		}
 
@@ -35,21 +36,20 @@ namespace pesieve {
 			outs << ",\n";
 			if (thread_state != THREAD_STATE_UNKNOWN) {
 				OUT_PADDED(outs, level, "\"thread_state\" : ");
-				outs << std::dec << thread_state;
+				outs << "\"" << translate_thread_state(thread_state) << "\"";
 				outs << ",\n";
 
 				if (thread_state == THREAD_STATE_WAITING) {
 					OUT_PADDED(outs, level, "\"thread_wait_reason\" : ");
-					outs << std::dec << thread_wait_reason;
+					outs << "\"" << translate_wait_reason(thread_wait_reason) << "\"";
 					outs << ",\n";
 				}
 			}
 			OUT_PADDED(outs, level, "\"protection\" : ");
 			outs << "\"" << std::hex << protection << "\"";
-			if (entropy_filled) {
+			if (stats.isFilled()) {
 				outs << ",\n";
-				OUT_PADDED(outs, level, "\"entropy\" : ");
-				outs << "\"" << std::dec << entropy << "\"";
+				stats.toJSON(outs, level);
 			}
 		}
 
@@ -67,8 +67,11 @@ namespace pesieve {
 		DWORD protection;
 		DWORD thread_state;
 		DWORD thread_wait_reason;
-		double entropy;
-		bool entropy_filled;
+		AreaEntropyStats stats;
+
+	protected:
+		static std::string translate_thread_state(DWORD thread_state);
+		static std::string translate_wait_reason(DWORD thread_wait_reason);
 	};
 
 	//!  A custom structure keeping a fragment of a thread context
@@ -85,10 +88,6 @@ namespace pesieve {
 	//!  Stack-scan inspired by the idea presented here: https://github.com/thefLink/Hunt-Sleeping-Beacons
 	class ThreadScanner : public ProcessFeatureScanner {
 	public:
-		// neccessery to validly recognize stack frame
-		static bool InitSymbols(HANDLE hProc);
-		static bool FreeSymbols(HANDLE hProc);
-
 		ThreadScanner(HANDLE hProc, bool _isReflection, const util::thread_info& _info, ModulesInfo& _modulesInfo, peconv::ExportsMapper* _exportsMap)
 			: ProcessFeatureScanner(hProc), isReflection(_isReflection),
 			info(_info), modulesInfo(_modulesInfo), exportsMap(_exportsMap)
@@ -103,7 +102,7 @@ namespace pesieve {
 		bool resolveAddr(ULONGLONG addr);
 		bool fetchThreadCtx(IN HANDLE hProcess, IN HANDLE hThread, OUT thread_ctx& c);
 		size_t enumStackFrames(IN HANDLE hProcess, IN HANDLE hThread, IN LPVOID ctx, IN OUT thread_ctx& c);
-		bool checkAreaEntropy(ThreadScanReport* my_report);
+		bool fillAreaStats(ThreadScanReport* my_report);
 		bool reportSuspiciousAddr(ThreadScanReport* my_report, ULONGLONG susp_addr, thread_ctx& c);
 
 		bool isReflection;
@@ -113,4 +112,3 @@ namespace pesieve {
 	};
 
 }; //namespace pesieve
-

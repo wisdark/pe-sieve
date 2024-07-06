@@ -35,8 +35,26 @@ bool pesieve::PeBuffer::readRemote(ULONGLONG module_base, size_t pe_vsize)
 	}
 	// try with the calculated size
 	pe_vsize = calcRemoteImgSize(module_base);
+#ifdef _DEBUG
 	std::cout << "[!] Image size at: " << std::hex << module_base << " undetermined, using calculated size: " << pe_vsize << std::endl;
+#endif
 	return _readRemote(module_base, pe_vsize);
+}
+
+bool pesieve::PeBuffer::fillFromBuffer(ULONGLONG module_base, util::ByteBuffer& data_cache)
+{
+	size_t cached_size = data_cache.getDataSize();
+	if (!cached_size) {
+		return false;
+	}
+	if (!allocBuffer(cached_size)) {
+		return false;
+	}
+	this->moduleBase = module_base;
+	this->relocBase = module_base; //by default set the same as module base
+
+	::memcpy(this->vBuf, data_cache.getData(), cached_size);
+	return true;
 }
 
 bool  pesieve::PeBuffer::_readRemote(const ULONGLONG module_base, size_t pe_vsize)
@@ -55,7 +73,9 @@ bool  pesieve::PeBuffer::_readRemote(const ULONGLONG module_base, size_t pe_vsiz
 	const bool can_force_access = this->isRefl ? true : false;
 	size_t read_size = peconv::read_remote_area(processHndl, (BYTE*)this->moduleBase, vBuf, pe_vsize, can_force_access);
 	if (read_size != pe_vsize) {
+#ifdef _DEBUG
 		std::cout << "[!] Failed reading Image at: " << std::hex << this->moduleBase << " img size: " << pe_vsize << std::endl;
+#endif
 		freeBuffer();
 		return false;
 	}

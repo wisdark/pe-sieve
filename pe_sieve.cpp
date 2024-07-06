@@ -14,8 +14,12 @@
 #include "utils/console_color.h"
 #include "color_scheme.h"
 
+#include "utils/artefacts_util.h"
+
 using namespace pesieve;
 using namespace pesieve::util;
+
+pesieve::PatternMatcher g_Matcher;
 
 namespace pesieve {
 	void check_access_denied(DWORD processID)
@@ -173,6 +177,21 @@ namespace pesieve {
 }; //namespace pesieve
 
 
+namespace pesieve {
+
+	inline bool is_by_patterns(const t_shellc_mode& shellc_mode)
+	{
+		switch (shellc_mode) {
+		case  SHELLC_PATTERNS:
+		case  SHELLC_PATTERNS_OR_STATS:
+		case SHELLC_PATTERNS_AND_STATS:
+			return true;
+		}
+		return false;
+	}
+
+}; // namespace pesieve
+
 pesieve::ReportEx* pesieve::scan_and_dump(IN const pesieve::t_params args)
 {
 	ReportEx *report = new(std::nothrow) ReportEx();
@@ -187,6 +206,17 @@ pesieve::ReportEx* pesieve::scan_and_dump(IN const pesieve::t_params args)
 		if (!args.quiet) std::cerr << "[-] Could not set debug privilege" << std::endl;
 	}
 
+	if (args.pattern_file.length) {
+		size_t loaded = g_Matcher.loadPatternFile(args.pattern_file.buffer);
+		if (!args.quiet) {
+			if (loaded) std::cout << "[+] Pattern file loaded: " << args.pattern_file.buffer << ", Signs: " << loaded << std::endl;
+			else std::cerr << "[-] Failed to load pattern file: " << args.pattern_file.buffer << std::endl;
+		}
+	}
+	if (is_by_patterns(args.shellcode)) {
+		g_Matcher.initShellcodePatterns();
+	}
+	
 	try {
 		orig_proc = open_process(args.pid, args.make_reflection, args.quiet);
 		HANDLE target_proc = orig_proc;
@@ -217,8 +247,8 @@ pesieve::ReportEx* pesieve::scan_and_dump(IN const pesieve::t_params args)
 		ProcessScanner scanner(target_proc, is_reflection, args);
 		report->scan_report = scanner.scanRemote();
 
-		// dump process
 		if (report->scan_report) {
+			// dump elements from the process:
 			report->dump_report = make_dump(target_proc, is_reflection, args, *report->scan_report);
 		}
 	}

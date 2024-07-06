@@ -7,6 +7,7 @@
 #include <peconv.h>
 #include "scan_report.h"
 #include "module_data.h"
+#include "../utils/process_symbols.h"
 
 namespace pesieve {
 
@@ -50,7 +51,7 @@ namespace pesieve {
 		HANDLE processHandle;
 		bool isDEP;
 		const bool isReflection;
-		size_t hModsMax;
+		ProcessSymbolsManager symbols;
 		pesieve::t_params args;
 
 		std::set<std::string> ignoredModules;

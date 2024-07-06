@@ -4,6 +4,7 @@
 
 #include "report_formatter.h"
 #include "dump_report.h"
+#include "pe_buffer.h"
 
 namespace pesieve {
 
@@ -29,7 +30,7 @@ namespace pesieve {
 			return this->dumpDir;
 		}
 
-		std::string makeOutPath(std::string fname, const std::string& defaultExtension = "");
+		std::string makeOutPath(const std::string &fname, const std::string& defaultExtension = "");
 
 	protected:
 		/**
@@ -57,11 +58,13 @@ namespace pesieve {
 		\param fname : known name of this module
 		\param defaultExtension : default extension - it will be used if no other extension was detected from the previous name
 		*/
-		std::string makeModuleDumpPath(ULONGLONG modBaseAddr, std::string fname, const std::string &defaultExtension);
+		std::string makeModuleDumpPath(ULONGLONG modBaseAddr, const std::string &fname, const std::string &defaultExtension);
 
 		std::string makeDirName(const DWORD process_id);
 
 		void makeAndJoinDirectories(std::stringstream& name_stream);
+
+		bool fillModuleCopy(IN ModuleScanReport* mod, IN OUT PeBuffer& module_buf);
 
 		std::string dumpDir; // dump directory
 		std::string baseDir; // base directory

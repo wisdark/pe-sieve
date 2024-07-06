@@ -1,5 +1,5 @@
 #include "scan_report.h"
-
+#include "../pe_sieve_ver_short.h"
 #include "headers_scanner.h"
 #include "code_scanner.h"
 #include "iat_scanner.h"
@@ -9,6 +9,7 @@
 #include "thread_scanner.h"
 
 #include "../utils/format_util.h"
+#include "../params_info/params_dump.h"
 
 using namespace pesieve;
 using namespace pesieve::util;
@@ -229,6 +230,8 @@ const bool pesieve::ProcessScanReport::toJSON(
 	stream << escape_path_separators(this->mainImagePath) << "\",\n";
 	OUT_PADDED(stream, level, "\"used_reflection\" : ");
 	stream << std::dec << report.is_reflection << ",\n";
+	OUT_PADDED(stream, level, "\"scanner_version\" : ");
+	stream << "\"" << PESIEVE_VERSION_STR << "\",\n";
 	OUT_PADDED(stream, level, "\"scanned\" : \n");
 	OUT_PADDED(stream, level, "{\n");
 	//stream << " {\n";

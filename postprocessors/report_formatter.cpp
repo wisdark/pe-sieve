@@ -38,7 +38,7 @@ std::string pesieve::scan_report_to_string(const ProcessScanReport &process_repo
 
 std::string pesieve::scan_report_to_json(
 	const ProcessScanReport &process_report,
-	ProcessScanReport::t_report_filter filter,																															
+	ProcessScanReport::t_report_filter filter,
 	const pesieve::t_json_level &jdetails,
 	size_t start_level
 )
@@ -81,7 +81,7 @@ std::string pesieve::report_to_json(const pesieve::ReportEx& report, const t_rep
 
 	size_t level = 1;
 	std::stringstream stream;
-	const bool has_dumps = (report.dump_report->countDumped() > 0) ? true : false;
+	const bool has_dumps = (report.dump_report && report.dump_report->countDumped() > 0) ? true : false;
 	stream << "{\n";
 	if (rtype == REPORT_ALL || rtype == REPORT_SCANNED) {
 		OUT_PADDED(stream, level, "\"scan_report\" :\n");

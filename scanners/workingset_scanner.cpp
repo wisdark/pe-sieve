@@ -6,17 +6,156 @@
 #include "../utils/path_converter.h"
 #include "../utils/workingset_enum.h"
 #include "../utils/artefacts_util.h"
-#include "../utils/entropy.h"
+
+#include <fstream>
 
 using namespace pesieve;
 using namespace pesieve::util;
 
-bool pesieve::WorkingSetScanner::isCode(MemPageData &memPage)
+extern pesieve::PatternMatcher g_Matcher;
+
+namespace pesieve {
+
+	inline bool is_by_stats(const t_shellc_mode& shellc_mode)
+	{
+		switch (shellc_mode) {
+		case  SHELLC_STATS:
+		case  SHELLC_PATTERNS_OR_STATS:
+		case SHELLC_PATTERNS_AND_STATS:
+			return true;
+		}
+		return false;
+	}
+
+	inline bool match_to_tag(std::ofstream& patch_report, const char delimiter, size_t start_offset, const sig_finder::Match &match)
+	{
+		if (patch_report.is_open() && match.sign) {
+			patch_report << std::hex << match.offset + start_offset;
+			patch_report << delimiter;
+			patch_report << match.sign->name;
+			patch_report << delimiter;
+			patch_report << match.sign->size();
+			patch_report << std::endl;
+			return true;
+		}
+		return false;
+	}
+};
+
+
+size_t WorkingSetScanReport::generateTags(const std::string& reportPath)
+{
+	if (this->custom_matched.size() == 0) {
+		return 0;
+	}
+	std::ofstream patch_report;
+	patch_report.open(reportPath);
+	if (patch_report.is_open() == false) {
+		return 0;
+	}
+	size_t count = 0;
+	for (auto itr = custom_matched.begin(); itr != custom_matched.end(); ++itr) {
+		sig_finder::Match m = *itr;
+		if (match_to_tag(patch_report, ';', this->match_area_start, m)) count++;
+	}
+	if (patch_report.is_open()) {
+		patch_report.close();
+	}
+	return count;
+}
+
+//---
+
+bool pesieve::WorkingSetScanner::checkAreaContent(IN MemPageData& memPage, OUT WorkingSetScanReport* my_report)
 {
 	if (!memPage.load()) {
 		return false;
 	}
-	return is_code(memPage.getLoadedData(), memPage.getLoadedSize());
+
+	const bool noPadding = true;
+
+	bool isByStats = is_by_stats(this->args.shellcode);
+
+	bool code = false;
+	bool codeP = false;
+	bool codeS = false;
+	bool obfuscated = false;
+
+	size_t custom_matched_count = 0;
+
+	if (g_Matcher.isReady()) {
+		std::vector<sig_finder::Match> allMatched;
+		my_report->all_matched_count = g_Matcher.findAllPatterns(memPage.getLoadedData(noPadding), memPage.getLoadedSize(noPadding), allMatched);
+		custom_matched_count = g_Matcher.filterCustom(allMatched, my_report->custom_matched);
+		if (my_report->all_matched_count) {
+			my_report->match_area_start = memPage.getStartOffset(noPadding);
+			codeP = true;
+			code = true;
+			if (this->args.shellcode == SHELLC_PATTERNS_OR_STATS) {
+				isByStats = false; // condition satisfied, no more checks required
+			}
+		}
+		else {
+			if (this->args.shellcode == SHELLC_PATTERNS_AND_STATS) {
+				isByStats = false; // condition NOT satisfied, no more checks required
+			}
+		}
+	}
+#ifdef CALC_PAGE_STATS
+	if (isByStats || this->args.obfuscated) {
+		
+		// fill default settings
+		MultiStatsSettings settings;
+		stats::fillCodeStrings(settings.watchedStrings);
+
+		AreaStatsCalculator calc(memPage.loadedData);
+		if (calc.fill(my_report->stats, &settings)) {
+
+			pesieve::RuleMatchersSet codeMatcher(RuleMatcher::RULE_CODE);
+			if (codeMatcher.findMatches(my_report->stats, my_report->area_info)) {
+				codeS = true;
+				code = true;
+			}
+
+			if (!codeS && (this->args.obfuscated != OBFUSC_NONE)) {
+				int rules = 0;
+				if (this->args.obfuscated == OBFUSC_ANY) rules = RuleMatcher::RULE_OBFUSCATED | RuleMatcher::RULE_ENCRYPTED;
+				if (this->args.obfuscated == OBFUSC_STRONG_ENC) rules = RuleMatcher::RULE_ENCRYPTED;
+				if (this->args.obfuscated == OBFUSC_WEAK_ENC) rules = RuleMatcher::RULE_OBFUSCATED;
+				pesieve::RuleMatchersSet obfMatcher(rules);
+				if (obfMatcher.findMatches(my_report->stats, my_report->area_info)) {
+					obfuscated = true;
+					// filter out cache:
+					if (memPage.mapping_type == MEM_MAPPED // mapped memory
+						&& !util::is_executable(memPage.mapping_type, memPage.protection) // non executable page
+						&& memPage.loadMappedName()) //named
+					{
+						obfuscated = false;
+					}
+				}
+			}
+		}
+	}
+#endif
+
+	if (this->args.shellcode == SHELLC_PATTERNS_AND_STATS) {
+		code = (codeP && codeS);
+	}
+	else if (this->args.shellcode == SHELLC_PATTERNS_OR_STATS) {
+		code = (codeP || codeS);
+	}
+
+	my_report->has_shellcode = code;
+
+	if ( (obfuscated && this->args.obfuscated != OBFUSC_NONE)
+		|| (code && (this->args.shellcode != SHELLC_NONE || custom_matched_count) ))
+	{
+		my_report->status = SCAN_SUSPICIOUS;
+	}
+	if (my_report->status == SCAN_SUSPICIOUS) {
+		my_report->data_cache = memPage.loadedData;
+	}
+	return true;
 }
 
 bool pesieve::WorkingSetScanner::isExecutable(MemPageData &memPage)
@@ -74,21 +213,30 @@ WorkingSetScanReport* pesieve::WorkingSetScanner::scanExecutableArea(MemPageData
 			return my_report1;
 		}
 	}
-	if (!this->args.shellcode) {
-		// not a PE file, and we are not interested in shellcode, so just finish it here
+	if ((!g_Matcher.isReady())
+		&& (this->args.obfuscated == OBFUSC_NONE))
+	{
+		// not a PE file, and we are not interested in patterns or obfuscated contents, so just finish it here
 		return nullptr;
 	}
-	if (!isCode(_memPage)) {
-		// shellcode patterns not found
-		return nullptr;
-	}
+
 	//report about shellcode:
 	ULONGLONG region_start = _memPage.region_start;
-	const size_t region_size = size_t (_memPage.region_end - region_start);
-	WorkingSetScanReport *my_report = new WorkingSetScanReport((HMODULE)region_start, region_size, SCAN_SUSPICIOUS);
+	const size_t region_size = size_t(_memPage.region_end - region_start);
+	WorkingSetScanReport* my_report = new WorkingSetScanReport((HMODULE)region_start, region_size, SCAN_NOT_SUSPICIOUS);
+	if (!my_report) {
+		return nullptr;
+	}
+	
+	if (!checkAreaContent(_memPage, my_report)) { // check for shellcode patterns & stats
+		my_report->status = SCAN_ERROR;
+	}
+	if (my_report->status == SCAN_NOT_SUSPICIOUS) {
+		// do not keep reports for not suspicious areas
+		delete my_report;
+		return nullptr;
+	}
 	my_report->has_pe = isScannedAsModule(_memPage) && this->processReport.hasModule(_memPage.region_start);
-	my_report->has_shellcode = true;
-	my_report->entropy = util::ShannonEntropy(_memPage.getLoadedData(), _memPage.getLoadedSize());
 	return my_report;
 }
 

@@ -15,8 +15,8 @@ namespace pesieve {
 		{
 			if (!field) return INVALID_OFFSET;
 
-			BYTE* loadedData = memPage.getLoadedData();
-			size_t loadedSize = memPage.getLoadedSize();
+			const BYTE* loadedData = memPage.getLoadedData();
+			const size_t loadedSize = memPage.getLoadedSize();
 			if (!peconv::validate_ptr(loadedData, loadedSize, field, sizeof(BYTE))) {
 				return INVALID_OFFSET;
 			}
@@ -233,7 +233,10 @@ size_t pesieve::ArtefactScanner::calcImageSize(MemPageData &memPage, IMAGE_SECTI
 
 IMAGE_DOS_HEADER* pesieve::ArtefactScanner::findDosHdrByPatterns(MemPageData &memPage, const size_t start_offset, size_t hdrs_offset)
 {
-	BYTE *search_ptr = memPage.getLoadedData() + start_offset;
+	BYTE* data = memPage.getLoadedData();
+	if (!data) return nullptr;
+
+	BYTE *search_ptr = data + start_offset;
 	BYTE *max_search = search_ptr + hdrs_offset;
 
 	size_t max_search_size = max_search - search_ptr;
@@ -303,7 +306,6 @@ bool pesieve::ArtefactScanner::_validateSecRegions(MemPageData &memPage, LPVOID 
 	}
 	IMAGE_SECTION_HEADER* curr_sec = (IMAGE_SECTION_HEADER*)sec_hdr;
 
-	bool fetched_any = false;
 	for (size_t i = 0; i < sec_count; i++, curr_sec++) {
 		if (curr_sec->VirtualAddress == 0) continue;
 
@@ -823,6 +825,9 @@ PeArtefacts* pesieve::ArtefactScanner::findArtefacts(MemPageData &_memPage, size
 		if (sec_offset != INVALID_OFFSET && sec_offset > min_offset) {
 			min_offset = sec_offset;
 		}
+	}
+	if (bestMapping.getScore() <= 1) {
+		return nullptr; // too low score	
 	}
 	//use the best found set of artefacts:
 	return generateArtefacts(bestMapping);

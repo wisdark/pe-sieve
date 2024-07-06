@@ -34,15 +34,21 @@ set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /MT")
 
 # modules:
 set ( M_PARSER "libpeconv/libpeconv" )
+set ( M_SIGFIND "sig_finder/sig_finder" )
 
 # modules paths:
-set (PECONV_DIR "${PROJECT_SOURCE_DIR}/${M_PARSER}" CACHE PATH "PEConv main path")
+set ( PECONV_DIR "${PROJECT_SOURCE_DIR}/${M_PARSER}" CACHE PATH "PEConv main path")
+set ( SIGFIND_DIR "${PROJECT_SOURCE_DIR}/${M_SIGFIND}" CACHE PATH "SigFinder main path")
 
 # modules headers:
 include_directories ( ${PECONV_DIR}/include )
+include_directories ( ${SIGFIND_DIR}/include )
+
 # libs
-add_subdirectory (libpeconv/libpeconv)
+add_subdirectory (${M_PARSER})
 set ( PECONV_LIB $<TARGET_FILE:libpeconv> CACHE PATH "PEConvLib library path" )
+add_subdirectory(${M_SIGFIND})
+set ( SIGFIND_LIB $<TARGET_FILE:sig_finder> CACHE PATH "SigFinder library path" )
 
 if( NOT PESIEVE_AS_STATIC_LIB AND NOT PESIEVE_AS_DLL)
 	set ( M_PARAMKIT_LIB "paramkit" )
@@ -127,6 +133,20 @@ set (postprocessors_srcs
 	postprocessors/pe_reconstructor.cpp
 )
 
+set (stats_srcs
+	stats/stats_analyzer.cpp
+)
+
+set (stats_hdrs
+	stats/entropy.h
+	stats/stats.h
+	stats/entropy_stats.h
+	stats/multi_stats.h
+	stats/stats_util.h
+	stats/stats_analyzer.h
+	stats/std_dev_calc.h
+)
+
 set (utils_srcs
 	utils/format_util.cpp
 	utils/process_util.cpp
@@ -157,15 +177,20 @@ set (utils_hdrs
 	utils/process_reflection.h
 	utils/console_color.h
 	utils/strings_util.h
-	utils/entropy.h
+	utils/byte_buffer.h
+	utils/code_patterns.h
+	utils/custom_mutex.h
+	utils/process_symbols.h
 )
 
 set (params_info_hdrs
 	params_info/pe_sieve_params_info.h
+	params_info/params_dump.h
 )
 
 set (params_info_srcs
 	params_info/pe_sieve_params_info.cpp
+	params_info/params_dump.cpp
 )
 
 set (srcs
@@ -176,6 +201,7 @@ set (srcs
 	${postprocessors_srcs}
 	${imprec_srcs}
 	${utils_srcs}
+	${stats_srcs}
 )
 
 set (hdrs
@@ -187,6 +213,7 @@ set (hdrs
 	${postprocessors_hdrs}
 	${imprec_hdrs}
 	${utils_hdrs}
+	${stats_hdrs}
 )
 
 set (rsrc
@@ -202,6 +229,9 @@ SOURCE_GROUP("Header Files\\scanners" FILES ${scanners_hdrs} )
 
 SOURCE_GROUP("Source Files\\utils" FILES ${utils_srcs} )
 SOURCE_GROUP("Header Files\\utils" FILES ${utils_hdrs} )
+
+SOURCE_GROUP("Source Files\\stats" FILES ${stats_srcs} )
+SOURCE_GROUP("Header Files\\stats" FILES ${stats_hdrs} )
 
 SOURCE_GROUP("Source Files\\params_info" FILES ${params_info_srcs} )
 SOURCE_GROUP("Header Files\\params_info" FILES ${params_info_hdrs} )
@@ -253,18 +283,20 @@ if(PESIEVE_AS_STATIC_LIB OR PESIEVE_AS_DLL)
 	)
 	set_source_files_properties(main.def PROPERTIES HEADER_FILE_ONLY TRUE)
 else()
-	add_executable ( ${PROJECT_NAME} ${hdrs} ${srcs} ${rsrc} pe_sieve_res_icon.rc  main.cpp params.h )
+	add_executable ( ${PROJECT_NAME} ${hdrs} ${srcs} ${rsrc} pe_sieve_res_icon.rc main.cpp params.h )
 endif()
 
 set (used_libs
 	${PECONV_LIB}
+	${SIGFIND_LIB}
 	psapi.lib
 	ntdll.lib
 	shlwapi
+	imagehlp
 )
 
 # dependencies
-add_dependencies(${PROJECT_NAME} libpeconv )
+add_dependencies( ${PROJECT_NAME} libpeconv sig_finder )
 
 if(PESIEVE_AS_STATIC_LIB OR PESIEVE_AS_DLL)
 	include(GNUInstallDirs)
