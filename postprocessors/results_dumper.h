@@ -18,12 +18,21 @@ namespace pesieve {
 		}
 
 		// dump all modules detected as suspicious during the process scan
-		ProcessDumpReport* dumpDetectedModules(HANDLE hProcess, bool isRefl, ProcessScanReport &process_report, const pesieve::t_dump_mode dump_mode, const pesieve::t_imprec_mode imprec_mode);
+		ProcessDumpReport* dumpDetectedModules(
+			HANDLE hProcess, 
+			bool isRefl, 
+			ProcessScanReport &process_report, 
+			const pesieve::t_dump_mode dump_mode,
+			const t_imprec_mode imprec_mode,
+			const bool rebase
+		);
 
 		// dump JSON report from the process scan
-		bool dumpJsonReport(ProcessScanReport &process_report, const ProcessScanReport::t_report_filter &filter, const pesieve::t_json_level &jdetails);
+		bool dumpJsonReport(ProcessScanReport &process_report, const t_results_filter &filter, const pesieve::t_json_level &jdetails);
 
 		bool dumpJsonReport(ProcessDumpReport &process_report);
+
+		bool dumpJsonReport(ErrorReport& error_report, const t_results_filter& filter);
 
 		std::string getOutputDir()
 		{
@@ -40,6 +49,7 @@ namespace pesieve {
 		\param modReport : ModuleScanReport defining artefacts to be dumped
 		\param exportsMap : mapping of all the exported APIs available within the process (for imports reconstruction)
 		\param imprec_mode : mode in which imports reconstruction will be attempted
+		\param out_base : the base to which the output module should be rebased, 0 if default
 		\param dumpReport : ProcessDumpReport to which reports from the current dump will be appended
 		*/
 		bool dumpModule(
@@ -50,6 +60,7 @@ namespace pesieve {
 			IN const peconv::ExportsMapper *exportsMap,
 			IN const pesieve::t_dump_mode dump_mode,
 			IN const pesieve::t_imprec_mode imprec_mode,
+			IN bool rebase,
 			OUT ProcessDumpReport &dumpReport
 		);
 

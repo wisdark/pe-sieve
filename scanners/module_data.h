@@ -15,23 +15,21 @@ namespace pesieve {
 	class ModuleData {
 
 	public:
-		ModuleData(HANDLE _processHandle, HMODULE _module, bool _isPEBConnected, bool _useCache)
+		ModuleData(HANDLE _processHandle, HMODULE _module, bool _isPEBConnected, bool _useCache, const char* _moduleName = nullptr)
 			: processHandle(_processHandle), moduleHandle(_module),
 			isPEBConnected(_isPEBConnected), useCache(_useCache),
 			is_module_named(false), original_size(0), original_module(nullptr),
 			is_dot_net(false)
 		{
 			memset(szModName, 0, MAX_PATH);
-			loadModuleName();
-		}
-
-		ModuleData(HANDLE _processHandle, HMODULE _module, std::string module_name, bool _useCache)
-			: processHandle(_processHandle), moduleHandle(_module), useCache(_useCache),
-			is_module_named(false), original_size(0), original_module(nullptr),
-			is_dot_net(false)
-		{
-			memset(szModName, 0, MAX_PATH);
-			memcpy(this->szModName, module_name.c_str(), module_name.length());
+			if (!_moduleName) {
+				loadModuleName();
+			}
+			else {
+				const size_t nameLen = strnlen(_moduleName, MAX_PATH);
+				memcpy(this->szModName, _moduleName, nameLen);
+			}
+			
 		}
 
 		~ModuleData()
@@ -89,7 +87,7 @@ namespace pesieve {
 		}
 
 		bool loadOriginal();
-
+		bool switchToMappedPath();
 		bool switchToWow64Path();
 		bool reloadWow64();
 		bool relocateToBase(ULONGLONG new_base);
@@ -173,7 +171,11 @@ namespace pesieve {
 			if (imgBufferSize) {
 				return imgBufferSize;
 			}
-			return getHdrImageSize();
+			size_t defined_size = getHdrImageSize();
+			if (!defined_size) {
+				return 0;
+			}
+			return peconv::round_up_to_unit(defined_size, (size_t)PAGE_SIZE);
 		}
 
 		size_t getHeaderSize()

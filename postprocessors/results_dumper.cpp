@@ -13,7 +13,7 @@
 #include "../scanners/code_scanner.h"
 
 #define DIR_SEPARATOR "\\"
-
+#define DEFAULT_BASE  0x10000000
 //---
 namespace pesieve {
 
@@ -113,7 +113,7 @@ namespace pesieve {
 }; //namespace pesieve
 
 
-bool pesieve::ResultsDumper::dumpJsonReport(pesieve::ProcessScanReport &process_report, const ProcessScanReport::t_report_filter &filter, const pesieve::t_json_level &jdetails)
+bool pesieve::ResultsDumper::dumpJsonReport(pesieve::ProcessScanReport &process_report, const t_results_filter &filter, const pesieve::t_json_level &jdetails)
 {
 	std::stringstream stream;
 	size_t level = 1;
@@ -154,7 +154,7 @@ bool pesieve::ResultsDumper::dumpJsonReport(ProcessDumpReport &process_report)
 	size_t level = 1;
 	process_report.toJSON(stream, level);
 	std::string report_all = stream.str();
-	if (report_all.length() == 0) {
+	if (report_all.empty()) {
 		return false;
 	}
 	//ensure that the directory is created:
@@ -174,12 +174,40 @@ bool pesieve::ResultsDumper::dumpJsonReport(ProcessDumpReport &process_report)
 	return false;
 }
 
+bool pesieve::ResultsDumper::dumpJsonReport(ErrorReport& error_report, const t_results_filter& filter)
+{
+	std::stringstream stream;
+	size_t level = 1;
+
+	const std::string err_content = err_report_to_json(error_report, filter, level);
+	if (err_content.empty()) {
+		return false;
+	}
+
+	//ensure that the directory is created:
+	this->dumpDir = pesieve::ResultsDumper::makeDirName(error_report.pid);
+
+	std::ofstream json_report;
+	std::string report_path = makeOutPath("error_report.json");
+	json_report.open(report_path);
+	if (json_report.is_open() == false) {
+		return false;
+	}
+	json_report << err_content << std::endl;
+	if (json_report.is_open()) {
+		json_report.close();
+		return true;
+	}
+	return false;
+}
+
 pesieve::ProcessDumpReport* pesieve::ResultsDumper::dumpDetectedModules(
 	HANDLE processHandle,
 	bool isRefl,
 	ProcessScanReport &process_report, 
 	const pesieve::t_dump_mode dump_mode, 
-	const t_imprec_mode imprec_mode)
+	const t_imprec_mode imprec_mode,
+	const bool rebase)
 {
 	if (processHandle == nullptr) {
 		return nullptr;
@@ -187,13 +215,16 @@ pesieve::ProcessDumpReport* pesieve::ResultsDumper::dumpDetectedModules(
 	ProcessDumpReport *dumpReport = new ProcessDumpReport(process_report.getPid());
 	this->dumpDir = pesieve::ResultsDumper::makeDirName(process_report.getPid());
 
-	std::vector<ModuleScanReport*>::iterator itr;
-	for (itr = process_report.moduleReports.begin();
+	for (auto itr = process_report.moduleReports.begin();
 		itr != process_report.moduleReports.end();
 		++itr)
 	{
 		ModuleScanReport* mod = *itr;
 		if (mod->status != SCAN_SUSPICIOUS) {
+			continue;
+		}
+		// skip already dumped:
+		if (dumpReport->hasModule((ULONGLONG)mod->module, mod->moduleSize)) {
 			continue;
 		}
 		dumpModule(processHandle,
@@ -203,6 +234,7 @@ pesieve::ProcessDumpReport* pesieve::ResultsDumper::dumpDetectedModules(
 			process_report.exportsMap,
 			dump_mode,
 			imprec_mode,
+			rebase,
 			*dumpReport
 		);
 	}
@@ -234,6 +266,7 @@ bool pesieve::ResultsDumper::dumpModule(IN HANDLE processHandle,
 	IN const peconv::ExportsMapper *exportsMap,
 	IN const pesieve::t_dump_mode dump_mode,
 	IN const t_imprec_mode imprec_mode,
+	IN bool rebase,
 	OUT ProcessDumpReport &dumpReport
 )
 {
@@ -294,19 +327,29 @@ bool pesieve::ResultsDumper::dumpModule(IN HANDLE processHandle,
 		ImpReconstructor::t_imprec_res imprec_res = impRec.rebuildImportTable(exportsMap, imprec_mode);
 		modDumpReport->impRecMode = get_imprec_res_name(imprec_res);
 
-
+		// Define a base the module should be rebased to:
 		module_buf.setRelocBase(mod->getRelocBase());
+		ULONGLONG out_base = 0;
+		if (rebase) {
+			out_base = mod->origBase;
+			if (!out_base) {
+				out_base = DEFAULT_BASE;
+			}
+			module_buf.setRelocBase(out_base);
+		}
 		if (imprec_mode == pesieve::PE_IMPREC_NONE) {
 			modDumpReport->isDumped = module_buf.dumpPeToFile(modDumpReport->dumpFileName, curr_dump_mode);
 		}
 		else {
 			modDumpReport->isDumped = module_buf.dumpPeToFile(modDumpReport->dumpFileName, curr_dump_mode, exportsMap, &notCovered);
 		}
-		
 
 		if (!modDumpReport->isDumped) {
 			modDumpReport->isDumped = module_buf.dumpToFile(modDumpReport->dumpFileName);
 			curr_dump_mode = peconv::PE_DUMP_VIRTUAL;
+		}
+		if (curr_dump_mode != peconv::PE_DUMP_VIRTUAL && out_base) {
+			modDumpReport->rebasedTo = out_base;
 		}
 		modDumpReport->mode_info = get_dump_mode_name(curr_dump_mode);
 		bool iat_not_rebuilt = (imprec_res == ImpReconstructor::IMP_RECOVERY_ERROR) || (imprec_res == ImpReconstructor::IMP_RECOVERY_NOT_APPLICABLE);

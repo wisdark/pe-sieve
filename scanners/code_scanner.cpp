@@ -10,7 +10,7 @@
 using namespace pesieve;
 using namespace pesieve::util;
 
-size_t pesieve::CodeScanReport::generateTags(std::string reportPath)
+size_t pesieve::CodeScanReport::generateTags(const std::string& reportPath)
 {
 	if (patchesList.size() == 0) {
 		return 0;
@@ -361,10 +361,9 @@ pesieve::CodeScanReport* pesieve::CodeScanner::scanRemote()
 		}
 		return my_report;
 	}
-	ULONGLONG load_base = (ULONGLONG)moduleData.moduleHandle;
-	ULONGLONG hdr_base = remoteModData.getHdrImageBase();
-
-	my_report->relocBase = load_base;
+	const ULONGLONG load_base = (ULONGLONG)moduleData.moduleHandle;
+	const ULONGLONG hdr_base = remoteModData.getHdrImageBase();
+	my_report->origBase = moduleData.getHdrImageBase();
 	last_res = scanUsingBase(load_base, remote_code, my_report->sectionToResult, my_report->patchesList);
 	
 	if (load_base != hdr_base && my_report->patchesList.size() > 0) {

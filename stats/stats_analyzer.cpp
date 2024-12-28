@@ -56,7 +56,7 @@ namespace pesieve {
 		return points;
 	}
 
-	size_t countFoundStrings(IN const AreaMultiStats& stats, IN std::set<std::string> neededStrings, IN size_t minOccurrence)
+	size_t countFoundStrings(IN const AreaMultiStats& stats, IN const std::set<std::string> &neededStrings, IN size_t minOccurrence)
 	{
 		size_t totalCount = 0;
 		if (!stats.currArea.foundStrings.size()) {
@@ -100,7 +100,7 @@ namespace pesieve {
 	{
 		size_t valsCount = 0;
 		for (auto itr1 = currArea.frequencies.rbegin(); itr1 != currArea.frequencies.rend(); ++itr1) {
-			double counter = itr1->first;
+			double counter = (double)itr1->first;
 			if (counter >= mean) {
 				valsCount += itr1->second.size();
 			}
@@ -118,7 +118,7 @@ namespace pesieve {
 size_t pesieve::stats::fillCodeStrings(OUT std::set<std::string>& codeStrings)
 {
 	const size_t patterns_count = 8;
-	char *patterns[patterns_count] = {
+	char patterns[][patterns_count] = {
 		"WVS",
 		"SVW",
 		"D$",
@@ -211,7 +211,7 @@ namespace pesieve {
 		virtual bool _isMatching(IN const AreaMultiStats& stats)
 		{
 			const double kMinNBRatio = 0.17;
-			const BYTE mFreqVal = getMostFrequentValue<BYTE>(stats.currArea.frequencies);
+			BYTE mFreqVal = getMostFrequentValue(stats.currArea.frequencies);
 			double entropy = stats.currArea.entropy;
 			const size_t populationSize = stats.currArea.histogram.size();
 
@@ -281,7 +281,7 @@ namespace pesieve {
 		virtual bool _isMatching(IN const AreaMultiStats& stats)
 		{
 			double entropy = stats.currArea.entropy;
-			const BYTE mFreqVal = getMostFrequentValue<BYTE>(stats.currArea.frequencies);
+			const BYTE mFreqVal = getMostFrequentValue(stats.currArea.frequencies);
 			bool fullAreaEncrypted = (entropy > ENTROPY_STRONG_ENC_TRESHOLD);// strong encryption
 			if (mFreqVal != 0 && entropy > ENTROPY_ENC_TRESHOLD) {
 				if (stats.currArea.frequencies.size() > 1) {

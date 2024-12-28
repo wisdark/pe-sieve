@@ -64,12 +64,26 @@ namespace pesieve {
 		std::cout << ss.str() << std::endl;
 	}
 
+	bool is_running(HANDLE processHandle)
+	{
+		DWORD exitCode = 0;
+		if (GetExitCodeProcess(processHandle, &exitCode)) {
+			if (exitCode != STILL_ACTIVE) {
+#ifdef _DEBUG
+				std::cerr << "Process terminated, exit = " << std::dec << exitCode << "\n";
+#endif
+				return false; //process terminated, discontinue the scan
+			}
+		}
+		return true;
+	}
 };
 
 pesieve::ProcessScanner::ProcessScanner(HANDLE procHndl, bool is_reflection, pesieve::t_params _args)
-	: args(_args), isDEP(false), isReflection(is_reflection), symbols(procHndl)
+	: processHandle(procHndl), isDEP(false), isReflection(is_reflection),
+	args(_args)
 {
-	this->processHandle = procHndl;
+	symbols.InitSymbols(this->processHandle);
 	if (validate_param_str(args.modules_ignored)) {
 		pesieve::util::string_to_list(args.modules_ignored.buffer, PARAM_LIST_SEPARATOR, ignoredModules);
 	}
@@ -298,7 +312,7 @@ size_t pesieve::ProcessScanner::scanWorkingSet(ProcessScanReport &pReport) //thr
 	size_t counter = 0;
 	//now scan all the nodes:
 
-	for (auto set_itr = region_bases.begin(); set_itr != region_bases.end(); ++set_itr, ++counter) {
+	for (auto set_itr = region_bases.begin(); set_itr != region_bases.end() && is_running(this->processHandle); ++set_itr, ++counter) {
 		const mem_region_info region = *set_itr;
 
 		WorkingSetScanner scanner(this->processHandle, proc_details, region, this->args, pReport);
@@ -345,7 +359,7 @@ size_t pesieve::ProcessScanner::scanModules(ProcessScanReport &pReport)  //throw
 	}
 
 	size_t counter = 0;
-	for (counter = 0; counter < modules_count; counter++) {
+	for (counter = 0; counter < modules_count && is_running(this->processHandle); counter++) {
 		if (processHandle == nullptr) break;
 		const HMODULE module_base = hMods[counter];
 		//load module from file:
@@ -389,7 +403,7 @@ size_t pesieve::ProcessScanner::scanModules(ProcessScanReport &pReport)  //throw
 		//load data about the remote module
 		RemoteModuleData remoteModData(processHandle, this->isReflection, module_base);
 		if (!remoteModData.isInitialized()) {
-			//make a report that initializing remote module was not possible
+			if (!is_running(processHandle)) break;
 			pReport.appendReport(new MalformedHeaderReport(module_base, 0, modData.szModName));
 			continue;
 		}
@@ -436,7 +450,7 @@ size_t pesieve::ProcessScanner::scanModulesIATs(ProcessScanReport &pReport) //th
 	}
 	DWORD start_tick = GetTickCount();
 	size_t counter = 0;
-	for (counter = 0; counter < modules_count; counter++) {
+	for (counter = 0; counter < modules_count && is_running(this->processHandle); counter++) {
 		if (!processHandle) break; // this should never happen
 
 		const HMODULE module_base = hMods[counter];
@@ -467,11 +481,12 @@ size_t pesieve::ProcessScanner::scanModulesIATs(ProcessScanReport &pReport) //th
 	return counter;
 }
 
-
 size_t pesieve::ProcessScanner::scanThreads(ProcessScanReport& pReport) //throws exceptions
 {
-	if (!this->symbols.InitSymbols()) {
-		std::cerr << "Failed to initialize symbols!\n";
+	if (!this->symbols.IsInitialized()) {
+		if (!args.quiet) {
+			std::cerr << "[-] Failed to initialize symbols!\n";
+		}
 		return 0;
 	}
 
@@ -487,23 +502,27 @@ size_t pesieve::ProcessScanner::scanThreads(ProcessScanReport& pReport) //throws
 	}
 	DWORD start_tick = GetTickCount();
 
-	std::vector<thread_info> threads_info;
+	std::map<DWORD, thread_info> threads_info;
 	if (!pesieve::util::fetch_threads_info(pid, threads_info)) { //extended info, but doesn't work on old Windows...
 
 		if (!pesieve::util::fetch_threads_by_snapshot(pid, threads_info)) { // works on old Windows, but gives less data..
 
 			if (!args.quiet) {
-				std::cout << "[-] Failed enumerating threads." << std::endl;
+				std::cerr << "[-] Failed enumerating threads." << std::endl;
 			}
 			return 0;
 		}
 	}
+	if (!pesieve::util::query_threads_details(threads_info)) {
+		if (!args.quiet) {
+			std::cout << "[-] Failed quering thread details." << std::endl;
+		}
+	}
 
-	std::vector<thread_info>::iterator itr;
-	for (itr = threads_info.begin(); itr != threads_info.end(); ++itr) {
-		const thread_info &info = *itr;
+	for (auto itr = threads_info.begin(); itr != threads_info.end() && is_running(this->processHandle); ++itr) {
+		const thread_info &info = itr->second;
 		
-		ThreadScanner scanner(this->processHandle, this->isReflection, info,  pReport.modulesInfo, pReport.exportsMap);
+		ThreadScanner scanner(this->processHandle, this->isReflection, info,  pReport.modulesInfo, pReport.exportsMap, &symbols);
 		ThreadScanReport* report = scanner.scanRemote();
 		pReport.appendReport(report);
 	}

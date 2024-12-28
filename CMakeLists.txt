@@ -161,6 +161,7 @@ set (utils_srcs
 	utils/process_reflection.cpp
 	utils/console_color.cpp
 	utils/strings_util.cpp
+	utils/syscall_extractor.cpp
 )
 
 set (utils_hdrs
@@ -180,7 +181,9 @@ set (utils_hdrs
 	utils/byte_buffer.h
 	utils/code_patterns.h
 	utils/custom_mutex.h
+	utils/custom_buffer.h
 	utils/process_symbols.h
+	utils/syscall_extractor.h
 )
 
 set (params_info_hdrs

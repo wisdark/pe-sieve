@@ -27,6 +27,17 @@ namespace pesieve {
 		OUT_FILTERS_COUNT
 	} t_output_filter;
 
+	//! the flags defining what will be reported
+	typedef enum {
+		SHOW_NONE = 0,              ///< do not report any module
+		SHOW_ERRORS = 1,            ///< report only scan errors
+		SHOW_NOT_SUSPICIOUS = 2,    ///< report only not suspicious
+		SHOW_SUSPICIOUS = 4,        ///< report only suspicious
+		SHOW_SUSPICIOUS_AND_ERRORS = SHOW_ERRORS | SHOW_SUSPICIOUS,
+		SHOW_SUCCESSFUL_ONLY = SHOW_NOT_SUSPICIOUS | SHOW_SUSPICIOUS,
+		SHOW_ALL = SHOW_ERRORS | SHOW_NOT_SUSPICIOUS | SHOW_SUSPICIOUS,
+	} t_results_filter;
+
 	typedef enum {
 		SHELLC_NONE = 0,           ///< do not detect shellcode
 		SHELLC_PATTERNS,           ///< detect shellcodes by patterns
@@ -45,9 +56,9 @@ namespace pesieve {
 	} t_obfusc_mode;
 
 	typedef enum {
-		PE_IMPREC_NONE = 0, ///< do not try to recover imports
-		PE_IMPREC_AUTO,     ///< try to autodetect the most suitable mode
-		PE_IMPREC_UNERASE,  ///< recover erased parts of the partialy damaged import table
+		PE_IMPREC_NONE = 0,  ///< do not try to recover imports
+		PE_IMPREC_AUTO,      ///< try to autodetect the most suitable mode
+		PE_IMPREC_UNERASE,   ///< recover erased parts of the partialy damaged import table
 		PE_IMPREC_REBUILD0,  ///< build the import table from the scratch, basing on the found IAT(s): use only terminated blocks (restrictive mode)
 		PE_IMPREC_REBUILD1,  ///< build the import table from the scratch, basing on the found IAT(s): use terminated blocks, or blocks with more than 1 thunk
 		PE_IMPREC_REBUILD2,  ///< build the import table from the scratch, basing on the found IAT(s): use all found blocks (aggressive mode)
@@ -123,11 +134,13 @@ namespace pesieve {
 		t_iat_scan_mode iat;    ///< detect IAT hooking
 		t_data_scan_mode data;  ///< should scan non-executable pages?
 		bool minidump;          ///< make minidump of full process
+		bool rebase;            ///< rebase the module to its original base (if known)
 		t_dump_mode dump_mode;  ///< in which mode the detected PE implants should be dumped
 		bool json_output;       ///< display the final summary as the JSON report
 		bool make_reflection;   ///< operate on a process reflection rather than on the live process (this allows i.e. to force-read inaccessible pages)
 		bool use_cache;      ///< enable cache for the scanned modules
 		t_json_level json_lvl;  ///< level of the details of the JSON report
+		t_results_filter results_filter; ///< what type of results should be included in the report
 		char output_dir[MAX_PATH + 1];  ///< the root directory where the output should be saved (default: current directory)
 		PARAM_STRING modules_ignored; ///< a list of modules that will not be scanned, separated by PARAM_LIST_SEPARATOR
 		PARAM_STRING pattern_file; ///< a file with additional patterns for code recognition

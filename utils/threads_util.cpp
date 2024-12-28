@@ -3,41 +3,94 @@
 #include <peconv.h>
 #include <tlhelp32.h>
 #include "../utils/ntddk.h"
+#include "custom_buffer.h"
 
 #ifdef _DEBUG
 #include <iostream>
 #endif
 
-bool pesieve::util::fetch_threads_info(DWORD pid, std::vector<thread_info>& threads_info)
+
+namespace pesieve {
+	namespace util {
+
+		// Thread info structures:
+		typedef struct _THREAD_LAST_SYSCALL_INFORMATION
+		{
+			PVOID FirstArgument;
+			USHORT SystemCallNumber;
+		} THREAD_LAST_SYSCALL_INFORMATION, * PTHREAD_LAST_SYSCALL_INFORMATION;
+
+
+		bool query_thread_details(IN DWORD tid, OUT pesieve::util::thread_info& info)
+		{
+			static auto mod = GetModuleHandleA("ntdll.dll");
+			if (!mod) return false;
+
+			static auto pNtQueryInformationThread = reinterpret_cast<decltype(&NtQueryInformationThread)>(GetProcAddress(mod, "NtQueryInformationThread"));
+			if (!pNtQueryInformationThread)  return false;
+
+			const DWORD thAccess = THREAD_QUERY_INFORMATION | THREAD_GET_CONTEXT;
+			HANDLE hThread = OpenThread(thAccess, 0, tid);
+			if (!hThread) {
+				hThread = OpenThread(THREAD_QUERY_INFORMATION, 0, tid);
+				if (!hThread) return false;
+			}
+			bool isOk = false;
+			ULONG returnedLen = 0;
+			LPVOID startAddr = 0;
+			NTSTATUS status = 0;
+			status = pNtQueryInformationThread(hThread, ThreadQuerySetWin32StartAddress, &startAddr, sizeof(LPVOID), &returnedLen);
+			if (status == 0 && returnedLen == sizeof(startAddr)) {
+				info.start_addr = (ULONGLONG)startAddr;
+				isOk = true;
+			}
+			returnedLen = 0;
+			THREAD_LAST_SYSCALL_INFORMATION syscallInfo = { 0 };
+			status = pNtQueryInformationThread(hThread, ThreadLastSystemCall, &syscallInfo, sizeof(syscallInfo), &returnedLen);
+			if (status == 0 && returnedLen == sizeof(syscallInfo)) {
+				info.last_syscall = syscallInfo.SystemCallNumber;
+				isOk = true;
+			}
+			CloseHandle(hThread);
+			return isOk;
+		}
+
+	}; // namespace util
+}; // namespace pesieve
+
+
+bool pesieve::util::query_threads_details(IN OUT std::map<DWORD, pesieve::util::thread_info>& threads_info)
 {
-	BYTE* buffer = nullptr;
-	ULONG buffer_size = 0;
-	ULONG ret_len = 0;
+	for (auto itr = threads_info.begin(); itr != threads_info.end(); ++itr) {
+		pesieve::util::thread_info& info = itr->second;
+		if (!query_thread_details(info.tid, info)) return false;
+	}
+	return true;
+}
+
+bool pesieve::util::fetch_threads_info(IN DWORD pid, OUT std::map<DWORD, thread_info>& threads_info)
+{
+	AutoBuffer bBuf;
 
 	NTSTATUS status = STATUS_UNSUCCESSFUL;
 	while (status != STATUS_SUCCESS) {
-		status = NtQuerySystemInformation(SystemProcessInformation, buffer, buffer_size, &ret_len);
+		ULONG ret_len = 0;
+		status = NtQuerySystemInformation(SystemProcessInformation, bBuf.buf, bBuf.buf_size, &ret_len);
 		if (status == STATUS_INFO_LENGTH_MISMATCH) {
-			free(buffer);
-			buffer = nullptr;
-			buffer_size = 0;
-			buffer = (BYTE*)calloc(ret_len, 1);
-			if (!buffer) {
+			if (!bBuf.alloc(ret_len)) {
 				return false;
 			}
-			buffer_size = ret_len;
 			continue; // try again
 		}
 		break; //other error, or success
 	};
 
 	if (status != STATUS_SUCCESS) {
-		free(buffer);
 		return false;
 	}
 
 	bool found = false;
-	SYSTEM_PROCESS_INFORMATION* info = (SYSTEM_PROCESS_INFORMATION*)buffer;
+	SYSTEM_PROCESS_INFORMATION* info = (SYSTEM_PROCESS_INFORMATION*)bBuf.buf;
 	while (info) {
 		if (info->UniqueProcessId == pid) {
 			found = true;
@@ -55,34 +108,34 @@ bool pesieve::util::fetch_threads_info(DWORD pid, std::vector<thread_info>& thre
 			break;
 		}
 		info = (SYSTEM_PROCESS_INFORMATION*)((ULONG_PTR)info + info->NextEntryOffset);
-		if (!peconv::validate_ptr(buffer, buffer_size, info, sizeof(SYSTEM_PROCESS_INFORMATION))) {
+		if (!peconv::validate_ptr(bBuf.buf, bBuf.buf_size, info, sizeof(SYSTEM_PROCESS_INFORMATION))) {
 			break;
 		}
 	}
 
 	if (!found) {
-		free(buffer);
 		return false;
 	}
 
-	size_t thread_count = info->NumberOfThreads;
+	const size_t thread_count = info->NumberOfThreads;
 	for (size_t i = 0; i < thread_count; i++) {
-		thread_info threadi;
-
-		threadi.tid = MASK_TO_DWORD((ULONGLONG)info->Threads[i].ClientId.UniqueThread);
+		
+		const DWORD tid = MASK_TO_DWORD((ULONGLONG)info->Threads[i].ClientId.UniqueThread);
+		auto itr = threads_info.find(tid);
+		if (itr == threads_info.end()) {
+			threads_info[tid] = thread_info(tid);
+		}
+		thread_info &threadi = threads_info[tid];
 		threadi.is_extended = true;
-		threadi.ext.start_addr = (ULONG_PTR)info->Threads[i].StartAddress;
+		threadi.ext.sys_start_addr = (ULONG_PTR)info->Threads[i].StartAddress;
 		threadi.ext.state = info->Threads[i].ThreadState;
 		threadi.ext.wait_reason = info->Threads[i].WaitReason;
 		threadi.ext.wait_time  = info->Threads[i].WaitTime;
-		threads_info.push_back(threadi);
 	}
-
-	free(buffer);
 	return true;
 }
 
-bool pesieve::util::fetch_threads_by_snapshot(DWORD pid, std::vector<thread_info>& threads_info)
+bool pesieve::util::fetch_threads_by_snapshot(IN DWORD pid, OUT std::map<DWORD, thread_info>& threads_info)
 {
 	HANDLE hThreadSnapShot = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
 	if (hThreadSnapShot == INVALID_HANDLE_VALUE) {
@@ -107,12 +160,11 @@ bool pesieve::util::fetch_threads_by_snapshot(DWORD pid, std::vector<thread_info
 		if (th32.th32OwnerProcessID != pid) {
 			continue;
 		}
-
-		thread_info threadi;
-		threadi.tid = th32.th32ThreadID;
-		threadi.is_extended = false;
-		threads_info.push_back(threadi);
-
+		const DWORD tid = th32.th32ThreadID;
+		auto itr = threads_info.find(tid);
+		if (itr == threads_info.end()) {
+			threads_info[tid] = thread_info(tid);
+		}
 	} while (Thread32Next(hThreadSnapShot, &th32));
 
 	CloseHandle(hThreadSnapShot);

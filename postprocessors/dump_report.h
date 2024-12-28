@@ -18,7 +18,7 @@ namespace pesieve {
 	public:
 
 		ModuleDumpReport(ULONGLONG module_start, size_t module_size)
-			: moduleStart(module_start), moduleSize(module_size),
+			: moduleStart(module_start), moduleSize(module_size), rebasedTo(module_start),
 			isDumped(false), isReportDumped(false),
 			is_corrupt_pe(false),
 			is_shellcode(false)
@@ -29,6 +29,7 @@ namespace pesieve {
 
 		ULONGLONG moduleStart;
 		size_t moduleSize;
+		ULONGLONG rebasedTo;
 		bool is_corrupt_pe;
 		bool is_shellcode;
 		std::string impRecMode;
@@ -86,6 +87,20 @@ namespace pesieve {
 				}
 			}
 			return dumped;
+		}
+
+		bool hasModule(const ULONGLONG modBase, const size_t modSize) const
+		{
+			if (!modBase) return false;
+
+			for (auto itr = moduleReports.begin(); itr != moduleReports.end(); ++itr) {
+				const ModuleDumpReport* report = *itr;
+				if (!report->isDumped) continue; // dumping failed
+				if (report->moduleStart == modBase && report->moduleSize == modSize) {
+					return true;
+				}
+			}
+			return false;
 		}
 
 		virtual bool toJSON(std::stringstream &stream, size_t level) const;
